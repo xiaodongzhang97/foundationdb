@@ -41,7 +41,7 @@
 #include "flow/UnitTest.h"
 #include "flow/actorcompiler.h" // has to be last include
 
-#define BM_DEBUG true
+#define BM_DEBUG false
 
 // DO NOT CHANGE THIS
 // Special key where the value means the epoch + sequence number of the split, instead of the actual boundary
