@@ -2253,8 +2253,10 @@ ACTOR Future<Void> pruneRange(Reference<BlobManagerData> self,
 
 	// track which granules we have already added to traversal
 	// note: (startKey, startVersion) uniquely identifies a granule
-	state std::unordered_set<std::pair<const uint8_t*, Version>, boost::hash<std::pair<const uint8_t*, Version>>>
-	    visited;
+	/*state std::unordered_set<std::pair<const uint8_t*, Version>, boost::hash<std::pair<const uint8_t*, Version>>>
+	    visited;*/
+	// TODO why doesn't the above compile in CI?
+	state std::set<std::pair<const uint8_t*, Version>> visited;
 
 	state KeyRange range(KeyRangeRef(startKey, endKey)); // range for [startKey, endKey)
 
