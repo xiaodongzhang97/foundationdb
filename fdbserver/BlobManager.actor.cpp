@@ -223,6 +223,7 @@ struct BlobManagerData : NonCopyable, ReferenceCounted<BlobManagerData> {
 	std::set<NetworkAddress> recruitingLocalities; // the addrs of the workers being recruited on
 	AsyncVar<int> recruitingStream;
 	Promise<Void> foundBlobWorkers;
+	Promise<Void> doneRecovering;
 
 	int64_t epoch = -1;
 	int64_t seqNo = 1;
@@ -269,9 +270,7 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 			}
 
 			if (estimated.bytes > SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES || writeHot) {
-				// printf("  Splitting range\n");
 				// only split on bytes and write rate
-				state Standalone<VectorRef<KeyRef>> keys;
 				state StorageMetrics splitMetrics;
 				splitMetrics.bytes = SERVER_KNOBS->BG_SNAPSHOT_FILE_TARGET_BYTES;
 				splitMetrics.bytesPerKSecond = SERVER_KNOBS->SHARD_SPLIT_BYTES_PER_KSEC;
@@ -284,31 +283,39 @@ ACTOR Future<Standalone<VectorRef<KeyRef>>> splitRange(Reference<ReadYourWritesT
 				splitMetrics.iosPerKSecond = splitMetrics.infinity;
 				splitMetrics.bytesReadPerKSecond = splitMetrics.infinity;
 
-				while (keys.empty() || keys.back() < range.end) {
-					// allow partial in case we have a large split
-					Standalone<VectorRef<KeyRef>> newKeys =
-					    wait(tr->getTransaction().splitStorageMetrics(range, splitMetrics, estimated, true));
-					ASSERT(!newKeys.empty());
-					if (keys.empty()) {
-						keys = newKeys;
-					} else {
-						TEST(true); // large split that requires multiple rounds
-						// start key was repeated with last request, so don't include it
-						ASSERT(newKeys[0] == keys.back());
-						keys.append_deep(keys.arena(), newKeys.begin() + 1, newKeys.size() - 1);
+				state PromiseStream<Key> resultStream;
+				state Standalone<VectorRef<KeyRef>> keys;
+				state Future<Void> streamFuture =
+				    tr->getTransaction().splitStorageMetricsStream(resultStream, range, splitMetrics, estimated);
+				loop {
+					try {
+						Key k = waitNext(resultStream.getFuture());
+						keys.push_back_deep(keys.arena(), k);
+					} catch (Error& e) {
+						if (e.code() != error_code_end_of_stream) {
+							throw;
+						}
+						break;
 					}
-					range = KeyRangeRef(keys.back(), range.end);
 				}
+
 				ASSERT(keys.size() >= 2);
+				ASSERT(keys.front() == range.begin);
+				ASSERT(keys.back() == range.end);
 				return keys;
 			} else {
-				// printf("  Not splitting range\n");
+				if (BM_DEBUG) {
+					printf("Not splitting range\n");
+				}
 				Standalone<VectorRef<KeyRef>> keys;
 				keys.push_back_deep(keys.arena(), range.begin);
 				keys.push_back_deep(keys.arena(), range.end);
 				return keys;
 			}
 		} catch (Error& e) {
+			if (BM_DEBUG) {
+				printf("Splitting range got error %s\n", e.name());
+			}
 			wait(tr->onError(e));
 		}
 	}
@@ -499,21 +506,35 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 		// modify the in-memory assignment data structures, and send request off to worker
 		state UID workerId;
 		if (assignment.isAssign) {
+			bool skip = false;
 			// Ensure range isn't currently assigned anywhere, and there is only 1 intersecting range
 			auto currentAssignments = bmData->workerAssignments.intersectingRanges(assignment.keyRange);
 			int count = 0;
 			for (auto i = currentAssignments.begin(); i != currentAssignments.end(); ++i) {
-				/* TODO: rethink asserts here
 				if (assignment.assign.get().type == AssignRequestType::Continue) {
-				    ASSERT(assignment.worker.present());
-				    ASSERT(it.value() == assignment.worker.get());
-				} else {
-				    ASSERT(it.value() == UID());
+					ASSERT(assignment.worker.present());
+					if (i.range() != assignment.keyRange || i.cvalue() != assignment.worker.get()) {
+						if (BM_DEBUG) {
+							fmt::print("Out of date re-assign for ({0}, {1}). Assignment must have changed while "
+							           "checking split.\n  Reassign: [{2} - {3}): {4}\n  Existing: [{5} - {6}): {7}\n",
+							           bmData->epoch,
+							           seqNo,
+							           assignment.keyRange.begin.printable(),
+							           assignment.keyRange.end.printable(),
+							           assignment.worker.get().toString().substr(0, 5),
+							           i.begin().printable(),
+							           i.end().printable(),
+							           i.cvalue().toString().substr(0, 5));
+						}
+						skip = true;
+					}
 				}
-				*/
 				count++;
 			}
 			ASSERT(count == 1);
+			if (skip) {
+				continue;
+			}
 
 			if (assignment.worker.present() && assignment.worker.get().isValid()) {
 				if (BM_DEBUG) {
@@ -565,10 +586,10 @@ ACTOR Future<Void> rangeAssigner(Reference<BlobManagerData> bmData) {
 					// revoke the range for the worker that owns it, not the worker specified in the revoke
 					bmData->addActor.send(doRangeAssignment(bmData, assignment, it.value(), seqNo));
 				}
+				bmData->workerAssignments.insert(assignment.keyRange, UID());
 			}
 
 			bmData->assignsInProgress.cancel(assignment.keyRange);
-			bmData->workerAssignments.insert(assignment.keyRange, UID());
 		}
 	}
 }
@@ -1152,6 +1173,9 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 	// outer loop handles reconstructing stream if it got a retryable error
 	// do backoff, we can get a lot of retries in a row
 
+	// wait for blob manager to be done recovering, so it has initial granule mapping and worker data
+	wait(bmData->doneRecovering.getFuture());
+
 	// TODO knob?
 	state double backoff = 0.1;
 	loop {
@@ -1183,12 +1207,6 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					if (bmData->iAmReplaced.canBeSet()) {
 						bmData->iAmReplaced.send(Void());
 					}
-				} else if (rep.epoch < bmData->epoch) {
-					// TODO: revoke the range from that worker? and send optimistic halt req to other (zombie) BM?
-					// it's optimistic because such a BM is not necessarily a zombie. it could have gotten killed
-					// properly but the BW that sent this reply was behind (i.e. it started the req when the old BM
-					// was in charge and finished by the time the new BM took over)
-					continue;
 				}
 
 				// TODO maybe this won't be true eventually, but right now the only time the blob worker reports
@@ -1200,6 +1218,16 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 				if (!(currGranuleAssignment.begin() == rep.granuleRange.begin &&
 				      currGranuleAssignment.end() == rep.granuleRange.end &&
 				      currGranuleAssignment.cvalue() == bwInterf.id())) {
+					if (BM_DEBUG) {
+						fmt::print(
+						    "Manager {0} ignoring status from BW {1} for granule [{2} - {3}) since BW {4} owns it.\n",
+						    bmData->epoch,
+						    bwInterf.id().toString().substr(0, 5),
+						    rep.granuleRange.begin.printable(),
+						    rep.granuleRange.end.printable(),
+						    currGranuleAssignment.cvalue().toString().substr(0, 5));
+					}
+					// FIXME: could send revoke request
 					continue;
 				}
 
@@ -1215,10 +1243,12 @@ ACTOR Future<Void> monitorBlobWorkerStatus(Reference<BlobManagerData> bmData, Bl
 					}
 				} else {
 					if (BM_DEBUG) {
-						fmt::print("Manager {0} evaluating [{1} - {2}) for split\n",
+						fmt::print("Manager {0} evaluating [{1} - {2}) @ ({3}, {4}) for split\n",
 						           bmData->epoch,
 						           rep.granuleRange.begin.printable().c_str(),
-						           rep.granuleRange.end.printable().c_str());
+						           rep.granuleRange.end.printable().c_str(),
+						           rep.epoch,
+						           rep.seqno);
 					}
 					lastSeenSeqno.insert(rep.granuleRange, std::pair(rep.epoch, rep.seqno));
 					bmData->addActor.send(maybeSplitRange(bmData,
@@ -1384,14 +1414,23 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 		int64_t oldEpoch = std::get<1>(old.value());
 		int64_t oldSeqno = std::get<2>(old.value());
 		if (oldEpoch > newEpoch || (oldEpoch == newEpoch && oldSeqno > newSeqno)) {
-			newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
+			if (newId != oldWorker && newId != UID() && newEpoch == 0 && newSeqno == 1 &&
+			    old.begin() == newRange.begin && old.end() == newRange.end) {
+				// granule mapping disagrees with worker with highest value. Just do an explicit reassign to a random
+				// worker for now to ensure the conflict is resolved.
+				newer.push_back(std::pair(old.range(), std::tuple(UID(), oldEpoch, oldSeqno)));
+				allNewer = false;
+			} else {
+				newer.push_back(std::pair(old.range(), std::tuple(oldWorker, oldEpoch, oldSeqno)));
+			}
 		} else {
 			allNewer = false;
 			if (newId != UID()) {
 				// different workers can't have same epoch and seqno for granule assignment
 				ASSERT(oldEpoch != newEpoch || oldSeqno != newSeqno);
 			}
-			if (outOfDate != nullptr && oldEpoch > 0) {
+			if (outOfDate != nullptr && oldWorker != UID() &&
+			    (oldEpoch < newEpoch || (oldEpoch == newEpoch && oldSeqno < newSeqno))) {
 				outOfDate->push_back(std::pair(oldWorker, old.range()));
 			}
 		}
@@ -1403,7 +1442,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 
 		// then, if there were any ranges superceded by this one, insert them over this one
 		if (newer.size()) {
-			if (outOfDate != nullptr) {
+			if (outOfDate != nullptr && newId != UID()) {
 				outOfDate->push_back(std::pair(newId, newRange));
 			}
 			for (auto& it : newer) {
@@ -1411,7 +1450,7 @@ static void addAssignment(KeyRangeMap<std::tuple<UID, int64_t, int64_t>>& map,
 			}
 		}
 	} else {
-		if (outOfDate != nullptr) {
+		if (outOfDate != nullptr && newId != UID()) {
 			outOfDate->push_back(std::pair(newId, newRange));
 		}
 	}
@@ -1432,6 +1471,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 	// skip the rest of the algorithm for the first blob manager
 	if (bmData->epoch == 1) {
+		bmData->doneRecovering.send(Void());
 		return Void();
 	}
 
@@ -1663,7 +1703,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 	// Plus, we don't have a consistent snapshot of the mapping ACROSS blob workers, so we need the DB to reconcile any
 	// differences (eg blob manager revoked from worker A, assigned to B, the revoke from A was processed but the assign
 	// to B wasn't, meaning in the snapshot nobody owns the granule)
-	state KeyRef beginKey = blobGranuleMappingKeys.begin;
+	state Key beginKey = blobGranuleMappingKeys.begin;
 	loop {
 		try {
 			tr->setOption(FDBTransactionOptions::ACCESS_SYSTEM_KEYS);
@@ -1678,6 +1718,9 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 
 			// Add the mappings to our in memory key range map
 			for (int rangeIdx = 0; rangeIdx < results.size() - 1; rangeIdx++) {
+				// TODO REMOVE asserts eventually
+				ASSERT(results[rangeIdx].key.startsWith(blobGranuleMappingKeys.begin));
+				ASSERT(results[rangeIdx + 1].key.startsWith(blobGranuleMappingKeys.begin));
 				Key granuleStartKey = results[rangeIdx].key.removePrefix(blobGranuleMappingKeys.begin);
 				Key granuleEndKey = results[rangeIdx + 1].key.removePrefix(blobGranuleMappingKeys.begin);
 				if (results[rangeIdx].value.size()) {
@@ -1776,6 +1819,7 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 		fmt::print("BM {0} final ranges:\n", bmData->epoch);
 	}
 
+	int explicitAssignments = 0;
 	for (auto& range : workerAssignments.intersectingRanges(normalKeys)) {
 		int64_t epoch = std::get<1>(range.value());
 		int64_t seqno = std::get<2>(range.value());
@@ -1807,8 +1851,18 @@ ACTOR Future<Void> recoverBlobManager(Reference<BlobManagerData> bmData) {
 			raAssign.keyRange = range.range();
 			raAssign.assign = RangeAssignmentData(AssignRequestType::Normal);
 			bmData->rangesToAssign.send(raAssign);
+			explicitAssignments++;
 		}
 	}
+
+	TraceEvent("BlobManagerRecovered", bmData->id)
+	    .detail("Epoch", bmData->epoch)
+	    .detail("Granules", bmData->workerAssignments.size())
+	    .detail("Assigned", explicitAssignments)
+	    .detail("Revoked", outOfDateAssignments.size());
+
+	ASSERT(bmData->doneRecovering.canBeSet());
+	bmData->doneRecovering.send(Void());
 
 	return Void();
 }

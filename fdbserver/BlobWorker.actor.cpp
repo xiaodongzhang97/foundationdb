@@ -161,6 +161,7 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 	int64_t currentManagerEpoch = -1;
 
 	AsyncVar<ReplyPromiseStream<GranuleStatusReply>> currentManagerStatusStream;
+	bool statusStreamInitialized = false;
 
 	// FIXME: refactor out the parts of this that are just for interacting with blob stores from the backup business
 	// logic
@@ -176,6 +177,8 @@ struct BlobWorkerData : NonCopyable, ReferenceCounted<BlobWorkerData> {
 
 	Promise<Void> doGRVCheck;
 	NotifiedVersion grvVersion;
+
+	int changeFeedStreamReplyBufferSize = SERVER_KNOBS->BG_DELTA_FILE_TARGET_BYTES / 2;
 
 	BlobWorkerData(UID id, Database db) : id(id), db(db), stats(id, SERVER_KNOBS->WORKER_LOGGING_INTERVAL) {}
 	~BlobWorkerData() {
@@ -379,8 +382,15 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 
 			// FIXME: appears change feed destroy isn't working! ADD BACK
 			// wait(updateChangeFeed(tr, KeyRef(parentGranuleID.toString()), ChangeFeedStatus::CHANGE_FEED_DESTROY));
+
 			Key oldGranuleLockKey = blobGranuleLockKeyFor(parentGranuleRange);
-			tr->clear(singleKeyRange(oldGranuleLockKey));
+			// FIXME: deleting granule lock can cause races where another granule with the same range starts way later
+			// and thinks it can own the granule! Need to change file cleanup to destroy these, if there is no more
+			// granule in the history with that exact key range!
+			// Alternative fix could be to, on granule open, query for all overlapping granule locks and ensure none of
+			// them have higher (epoch, seqno), but that is much more expensive
+
+			// tr->clear(singleKeyRange(oldGranuleLockKey));
 			tr->clear(currentRange);
 			tr->clear(blobGranuleSplitBoundaryKeyRangeFor(parentGranuleID));
 		} else {
@@ -408,16 +418,19 @@ ACTOR Future<Void> updateGranuleSplitState(Transaction* tr,
 	return Void();
 }
 
-// returns the split state for a given granule on granule reassignment. Assumes granule is in fact splitting, by the
-// presence of the previous granule's lock key
+// Returns the split state for a given granule on granule reassignment, or unknown if it doesn't exist (meaning the
+// granule splitting finished)
 ACTOR Future<std::pair<BlobGranuleSplitState, Version>> getGranuleSplitState(Transaction* tr,
                                                                              UID parentGranuleID,
                                                                              UID currentGranuleID) {
 	Key myStateKey = blobGranuleSplitKeyFor(parentGranuleID, currentGranuleID);
 
 	Optional<Value> st = wait(tr->get(myStateKey));
-	ASSERT(st.present());
-	return decodeBlobGranuleSplitValue(st.get());
+	if (st.present()) {
+		return decodeBlobGranuleSplitValue(st.get());
+	} else {
+		return std::pair(BlobGranuleSplitState::Unknown, invalidVersion);
+	}
 }
 
 // writeDelta file writes speculatively in the common case to optimize throughput. It creates the s3 object even though
@@ -824,6 +837,10 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 
 	BlobFileIndex lastDeltaIdx = wait(lastDeltaBeforeSnapshot);
 	state Version reSnapshotVersion = lastDeltaIdx.version;
+	while (!bwData->statusStreamInitialized) {
+		wait(bwData->currentManagerStatusStream.onChange());
+	}
+
 	wait(delay(0, TaskPriority::BlobWorkerUpdateFDB));
 
 	if (BW_DEBUG) {
@@ -862,13 +879,6 @@ ACTOR Future<BlobFileIndex> checkSplitAndReSnapshot(Reference<BlobWorkerData> bw
 			} catch (Error& e) {
 				wait(bwData->currentManagerStatusStream.onChange());
 			}
-		}
-
-		// TODO: figure out why the status stream on change isn't working
-		// We could just do something like statusEpoch, save down the original status stream
-		// and compare it to the current one
-		if (statusEpoch < bwData->currentManagerEpoch) {
-			break;
 		}
 
 		choose {
@@ -928,7 +938,10 @@ ACTOR Future<Void> handleCompletedDeltaFile(Reference<BlobWorkerData> bwData,
 		wait(popFuture);
 	}
 	while (!rollbacksCompleted->empty() && completedDeltaFile.version >= rollbacksCompleted->front().second) {
-		fmt::print("Completed rollback {0} -> {1} with delta file {2}\n",
+		fmt::print("Granule [{0} - {1}) on BW {2} completed rollback {3} -> {4} with delta file {5}\n",
+		           metadata->keyRange.begin.printable().c_str(),
+		           metadata->keyRange.end.printable().c_str(),
+		           bwData->id.toString().substr(0, 5).c_str(),
 		           rollbacksCompleted->front().second,
 		           rollbacksCompleted->front().first,
 		           completedDeltaFile.version);
@@ -1134,7 +1147,7 @@ ACTOR Future<Void> waitOnCFVersion(Reference<GranuleMetadata> metadata,
 			if (DEBUG_BW_VERSION(original) && DEBUG_WAIT_VERSION_COMMITTED) {
 				fmt::print("WVC {0}:   got error {1} \n", original, e.name());
 			}
-			if (e.code() == error_code_operation_cancelled) {
+			if (e.code() == error_code_operation_cancelled || e.code() == error_code_change_feed_popped) {
 				throw e;
 			}
 
@@ -1338,12 +1351,18 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 			                                                      startVersion + 1,
 			                                                      startState.changeFeedStartVersion,
 			                                                      metadata->keyRange,
+			                                                      bwData->changeFeedStreamReplyBufferSize,
 			                                                      false);
 
 		} else {
 			readOldChangeFeed = false;
-			changeFeedFuture = bwData->db->getChangeFeedStream(
-			    newCFData, cfKey, startVersion + 1, MAX_VERSION, metadata->keyRange, false);
+			changeFeedFuture = bwData->db->getChangeFeedStream(newCFData,
+			                                                   cfKey,
+			                                                   startVersion + 1,
+			                                                   MAX_VERSION,
+			                                                   metadata->keyRange,
+			                                                   bwData->changeFeedStreamReplyBufferSize,
+			                                                   false);
 		}
 
 		// Start actors BEFORE setting new change feed data to ensure the change feed data is properly initialized by
@@ -1469,8 +1488,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 
 				Reference<ChangeFeedData> newCFData = makeReference<ChangeFeedData>();
 
-				changeFeedFuture = bwData->db->getChangeFeedStream(
-				    newCFData, cfKey, startState.changeFeedStartVersion, MAX_VERSION, metadata->keyRange, false);
+				changeFeedFuture = bwData->db->getChangeFeedStream(newCFData,
+				                                                   cfKey,
+				                                                   startState.changeFeedStartVersion,
+				                                                   MAX_VERSION,
+				                                                   metadata->keyRange,
+				                                                   bwData->changeFeedStreamReplyBufferSize,
+				                                                   false);
 
 				// Start actors BEFORE setting new change feed data to ensure the change feed data is properly
 				// initialized by the client
@@ -1531,9 +1555,13 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 								     metadata->currentDeltas.back().version <= rollbackVersion)) {
 
 									if (BW_DEBUG) {
-										fmt::print("BW skipping rollback {0} -> {1} completely\n",
-										           deltas.version,
-										           rollbackVersion);
+										fmt::print(
+										    "Granule [{0} - {1}) on BW {2} skipping rollback {0} -> {1} completely\n",
+										    metadata->keyRange.begin.printable().c_str(),
+										    metadata->keyRange.end.printable().c_str(),
+										    bwData->id.toString().substr(0, 5).c_str(),
+										    deltas.version,
+										    rollbackVersion);
 									}
 									// Still have to add to rollbacksCompleted. If we later roll the granule back past
 									// this because of cancelling a delta file, we need to count this as in progress so
@@ -1542,9 +1570,10 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 									rollbacksCompleted.push_back(std::pair(rollbackVersion, deltas.version));
 								} else {
 									if (BW_DEBUG) {
-										fmt::print("BW [{0} - {1}) ROLLBACK @ {2} -> {3}\n",
+										fmt::print("[{0} - {1}) on BW {2} ROLLBACK @ {2} -> {3}\n",
 										           metadata->keyRange.begin.printable(),
 										           metadata->keyRange.end.printable(),
+										           bwData->id.toString().substr(0, 5).c_str(),
 										           deltas.version,
 										           rollbackVersion);
 										TraceEvent(SevWarn, "GranuleRollback", bwData->id)
@@ -1590,6 +1619,7 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										                                    cfRollbackVersion + 1,
 										                                    startState.changeFeedStartVersion,
 										                                    metadata->keyRange,
+										                                    bwData->changeFeedStreamReplyBufferSize,
 										                                    false);
 
 									} else {
@@ -1600,12 +1630,14 @@ ACTOR Future<Void> blobGranuleUpdateFiles(Reference<BlobWorkerData> bwData,
 										}
 										ASSERT(cfRollbackVersion >= startState.changeFeedStartVersion);
 
-										changeFeedFuture = bwData->db->getChangeFeedStream(newCFData,
-										                                                   cfKey,
-										                                                   cfRollbackVersion + 1,
-										                                                   MAX_VERSION,
-										                                                   metadata->keyRange,
-										                                                   false);
+										changeFeedFuture =
+										    bwData->db->getChangeFeedStream(newCFData,
+										                                    cfKey,
+										                                    cfRollbackVersion + 1,
+										                                    MAX_VERSION,
+										                                    metadata->keyRange,
+										                                    bwData->changeFeedStreamReplyBufferSize,
+										                                    false);
 									}
 
 									// Start actors BEFORE setting new change feed data to ensure the change feed data
@@ -2125,7 +2157,7 @@ ACTOR Future<Void> waitForVersion(Reference<GranuleMetadata> metadata, Version v
 	return Void();
 }
 
-ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
+ACTOR Future<Void> doBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
 	if (BW_REQUEST_DEBUG || DEBUG_BW_WAIT_VERSION == req.readVersion) {
 		fmt::print("BW {0} processing blobGranuleFileRequest for range [{1} - {2}) @ {3}\n",
 		           bwData->id.toString(),
@@ -2310,6 +2342,9 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 						}
 					} catch (Error& e) {
 						// we can get change feed cancelled from whenAtLeast. This is effectively
+						if (e.code() == error_code_change_feed_popped) {
+							throw wrong_shard_server();
+						}
 						if (e.code() != error_code_change_feed_cancelled) {
 							throw e;
 						}
@@ -2425,6 +2460,7 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 
 			wait(yield(TaskPriority::DefaultEndpoint));
 		}
+		ASSERT(!req.reply.isSet());
 		req.reply.send(rep);
 		--bwData->stats.activeReadRequests;
 	} catch (Error& e) {
@@ -2442,6 +2478,30 @@ ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData
 			req.reply.sendError(e);
 		} else {
 			throw e;
+		}
+	}
+	return Void();
+}
+
+ACTOR Future<Void> handleBlobGranuleFileRequest(Reference<BlobWorkerData> bwData, BlobGranuleFileRequest req) {
+	choose {
+		when(wait(doBlobGranuleFileRequest(bwData, req))) {}
+		when(wait(delay(SERVER_KNOBS->BLOB_WORKER_REQUEST_TIMEOUT))) {
+			if (!req.reply.isSet()) {
+				TEST(true); // Blob Worker request timeout hit
+				if (BW_DEBUG) {
+					fmt::print("BW {0} request [{1} - {2}) @ {3} timed out, sending WSS\n",
+					           bwData->id.toString().substr(0, 5),
+					           req.keyRange.begin.printable(),
+					           req.keyRange.end.printable(),
+					           req.readVersion);
+				}
+				--bwData->stats.activeReadRequests;
+				++bwData->stats.granuleRequestTimeouts;
+
+				// return wrong_shard_server because it's possible that someone else actually owns the granule now
+				req.reply.sendError(wrong_shard_server());
+			}
 		}
 	}
 	return Void();
@@ -2570,7 +2630,6 @@ ACTOR Future<GranuleStartState> openGranule(Reference<BlobWorkerData> bwData, As
 						// will be set later
 					} else {
 						// this sub-granule is done splitting, no need for split logic.
-						ASSERT(granuleSplitState.first == BlobGranuleSplitState::Done);
 						info.parentGranule.reset();
 					}
 				}
@@ -3094,7 +3153,8 @@ ACTOR Future<Void> blobWorker(BlobWorkerInterface bwInterf,
 					self->currentManagerStatusStream.get().sendError(connection_failed());
 
 					// TODO: pick a reasonable byte limit instead of just piggy-backing
-					req.reply.setByteLimit(SERVER_KNOBS->RANGESTREAM_LIMIT_BYTES);
+					req.reply.setByteLimit(SERVER_KNOBS->BLOBWORKERSTATUSSTREAM_LIMIT_BYTES);
+					self->statusStreamInitialized = true;
 					self->currentManagerStatusStream.set(req.reply);
 				} else {
 					req.reply.sendError(blob_manager_replaced());
