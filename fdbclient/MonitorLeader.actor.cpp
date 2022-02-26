@@ -178,10 +178,6 @@ void ClusterConnectionString::resetToUnresolved() {
 	}
 }
 
-void ClusterConnectionString::resetConnectionString() {
-	connectionString = toString();
-}
-
 void ClusterConnectionString::parseConnString() {
 	// Split on '@' into key@addrs
 	int pAt = connectionString.find_first_of('@');
@@ -448,14 +444,26 @@ ClusterConnectionString::ClusterConnectionString(const std::vector<NetworkAddres
   : status(RESOLVED), coords(servers) {
 	std::string keyString = key.toString();
 	parseKey(keyString);
-	resetConnectionString();
+	connectionString = keyString + "@";
+	for (int i = 0; i < coords.size(); i++) {
+		if (i) {
+			connectionString += ',';
+		}
+		connectionString += coords[i].toString();
+	}
 }
 
 ClusterConnectionString::ClusterConnectionString(const std::vector<Hostname>& hosts, Key key)
   : status(UNRESOLVED), hostnames(hosts) {
 	std::string keyString = key.toString();
 	parseKey(keyString);
-	resetConnectionString();
+	connectionString = keyString + "@";
+	for (int i = 0; i < hostnames.size(); i++) {
+		if (i) {
+			connectionString += ',';
+		}
+		connectionString += hostnames[i].toString();
+	}
 }
 
 void ClusterConnectionString::parseKey(const std::string& key) {
