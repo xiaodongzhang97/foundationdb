@@ -697,7 +697,8 @@ struct ReadWriteWorkload : KVWorkload {
 						while (exist_keys.find(k) != exist_keys.end()) {
 							k = self->getRandomKey(self->nodeCount);
 						}
-						keys.push_back();
+						exist_keys.insert(k);
+						keys.push_back(k);
 					}
 				} else {
 					int startKey = self->getRandomKey(self->nodeCount - reads);
