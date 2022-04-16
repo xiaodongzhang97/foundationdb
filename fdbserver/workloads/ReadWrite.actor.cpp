@@ -691,8 +691,8 @@ struct ReadWriteWorkload : KVWorkload {
 				state int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
 				state int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
 				state int extra_write_conflict_ranges = writes ? self->extraWriteConflictRangesPerTransaction : 0;
+				state std::set<int64_t> exist_keys;
 				if (!self->adjacentReads) {
-					state std::set<int64_t> exist_keys;
 					for (int op = 0; op < reads; op++) {
 						state int64_t k = self->getRandomKey(self->nodeCount);
 						while (exist_keys.find(k) != exist_keys.end()) {
@@ -761,8 +761,14 @@ struct ReadWriteWorkload : KVWorkload {
 							for (int op = 0; op < writes; op++)
 								tr.set(self->keyForIndex(startKey + op, false), values[op]);
 						} else {
-							for (int op = 0; op < writes; op++)
-								tr.set(self->keyForIndex(keys[op % keys.size()], false), values[op]);
+							for (int op = 0; op < writes; op++) {
+								state int64_t k = self->getRandomKey(self->nodeCount);
+								while (exist_keys.find(k) != exist_keys.end()) {
+									k = self->getRandomKey(self->nodeCount);
+								}
+								exist_keys.insert(k);
+								tr.set(self->keyForIndex(k, false), values[op]);
+							}
 						}
 						for (int op = 0; op < extra_read_conflict_ranges; op++)
 							tr.addReadConflictRange(extra_ranges[op]);
