@@ -694,12 +694,12 @@ struct ReadWriteWorkload : KVWorkload {
 				state std::set<int64_t> exist_keys;
 				if (!self->adjacentReads) {
 					for (int op = 0; op < reads; op++) {
-						state int64_t k = self->getRandomKey(self->nodeCount);
-						while (exist_keys.find(k) != exist_keys.end()) {
-							k = self->getRandomKey(self->nodeCount);
+						state int64_t rk = self->getRandomKey(self->nodeCount);
+						while (exist_keys.find(rk) != exist_keys.end()) {
+							rk = self->getRandomKey(self->nodeCount);
 						}
-						exist_keys.insert(k);
-						keys.push_back(k);
+						exist_keys.insert(rk);
+						keys.push_back(rk);
 					}
 				} else {
 					int startKey = self->getRandomKey(self->nodeCount - reads);
@@ -762,12 +762,12 @@ struct ReadWriteWorkload : KVWorkload {
 								tr.set(self->keyForIndex(startKey + op, false), values[op]);
 						} else {
 							for (int op = 0; op < writes; op++) {
-								state int64_t k = self->getRandomKey(self->nodeCount);
-								while (exist_keys.find(k) != exist_keys.end()) {
-									k = self->getRandomKey(self->nodeCount);
+								state int64_t wk = self->getRandomKey(self->nodeCount);
+								while (exist_keys.find(wk) != exist_keys.end()) {
+									wk = self->getRandomKey(self->nodeCount);
 								}
-								exist_keys.insert(k);
-								tr.set(self->keyForIndex(k, false), values[op]);
+								exist_keys.insert(wk);
+								tr.set(self->keyForIndex(wk, false), values[op]);
 							}
 						}
 						for (int op = 0; op < extra_read_conflict_ranges; op++)
