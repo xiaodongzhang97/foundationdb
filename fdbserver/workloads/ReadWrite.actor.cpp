@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "zipf.h"
+#include "fdbclient/zipf.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
