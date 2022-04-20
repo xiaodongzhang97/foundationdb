@@ -22,7 +22,7 @@
 #include <utility>
 #include <vector>
 
-#include "fdbclient/zipf.h"
+#include "myzipf.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -100,7 +100,7 @@ struct ReadWriteWorkload : KVWorkload {
 	bool rampTransactionType;
 	bool rampUpConcurrency;
 	bool batchPriority;
-
+	ZipfianGenerator* myzipf;
 	Standalone<StringRef> descriptionString;
 
 	Int64MetricHandle totalReadsMetric;
@@ -159,7 +159,7 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 
 		if (zipf) {
-			zipfian_generator3(0, nodeCount, zipfConstant);
+			myzipf = new ZipfianGenerator(0, nodeCount, zipfConstant);
 		}
 
 		metricsStart = getOption(options, LiteralStringRef("metricsStart"), 0.0);
@@ -626,7 +626,7 @@ struct ReadWriteWorkload : KVWorkload {
 
 	int64_t getRandomKey(uint64_t nodeCount) {
 		if (zipf) {
-			return zipfian_next();
+			return myzipf->nextValue();
 		} else {
 			if (forceHotProbability && deterministicRandom()->random01() < forceHotProbability)
 				return deterministicRandom()->randomInt64(0, nodeCount * hotKeyFraction) /
