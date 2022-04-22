@@ -300,10 +300,10 @@ private:
 			oflags |= O_RDWR;
 		if (flags & OPEN_ATOMIC_WRITE_AND_CREATE)
 			oflags |= O_TRUNC;
-#if defined(__linux__)
-		if (flags & OPEN_UNBUFFERED && FLOW_KNOBS->EIO_USE_ODIRECT)
-			oflags |= O_DIRECT;
-#endif
+//#if defined(__linux__)
+//		if (flags & OPEN_UNBUFFERED && FLOW_KNOBS->EIO_USE_ODIRECT)
+//			oflags |= O_DIRECT;
+//#endif
 		return oflags;
 	}
 
