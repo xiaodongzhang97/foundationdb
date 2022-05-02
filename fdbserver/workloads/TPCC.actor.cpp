@@ -627,6 +627,7 @@ struct TPCC : TestWorkload {
 			state double txnStartTime = g_network->now();
 
 			if (type < 4) {
+				TraceEvent("ZXD: Begin do a stock level");
 				tx = stockLevel(self, cx, w_id, d_id);
 				bool committed = wait(tx);
 				if (self->recordMetrics()) {
@@ -637,9 +638,14 @@ struct TPCC : TestWorkload {
 					                           self->metrics.stockLevelLatencies,
 					                           self->metrics.stockLevelResponseTime,
 					                           "StockLevel");
+					TraceEvent("ZXD: Done a stock level and record metric");
+				}
+				else{
+					TraceEvent("ZXD: Done a stock level but didn't record metric");
 				}
 				wait(delay(2 + deterministicRandom()->random01() * 10));
 			} else if (type < 8) {
+				TraceEvent("ZXD: Begin do a delivery");
 				tx = delivery(self, cx, w_id);
 				bool committed = wait(tx);
 				if (self->recordMetrics()) {
@@ -650,9 +656,14 @@ struct TPCC : TestWorkload {
 					                           self->metrics.deliveryLatencies,
 					                           self->metrics.deliveryResponseTime,
 					                           "Delivery");
+					TraceEvent("ZXD: Done a delivery and record metric");
+				}
+				else{
+					TraceEvent("ZXD: Done a delivery but didn't record metric");
 				}
 				wait(delay(2 + deterministicRandom()->random01() * 10));
 			} else if (type < 12) {
+				TraceEvent("ZXD: Begin do a order status");
 				tx = orderStatus(self, cx, w_id);
 				bool committed = wait(tx);
 				if (self->recordMetrics()) {
@@ -663,9 +674,14 @@ struct TPCC : TestWorkload {
 					                           self->metrics.orderStatusLatencies,
 					                           self->metrics.orderStatusResponseTime,
 					                           "OrderStatus");
+					TraceEvent("ZXD: Done a order status and record metric");
+				}
+				else{
+					TraceEvent("ZXD: Done a order status but didn't record metric");
 				}
 				wait(delay(2 + deterministicRandom()->random01() * 20));
 			} else if (type < 55) {
+				TraceEvent("ZXD: Begin do a payment");
 				tx = payment(self, cx, w_id);
 				bool committed = wait(tx);
 				if (self->recordMetrics()) {
@@ -676,9 +692,14 @@ struct TPCC : TestWorkload {
 					                           self->metrics.paymentLatencies,
 					                           self->metrics.paymentResponseTime,
 					                           "Payment");
+					TraceEvent("ZXD: Done a payment and record metric");
+				}
+				else{
+					TraceEvent("ZXD: Done a payment but didn't record metric");
 				}
 				wait(delay(3 + deterministicRandom()->random01() * 24));
 			} else {
+				TraceEvent("ZXD: Begin do a new order");
 				tx = newOrder(self, cx, w_id);
 				bool committed = wait(tx);
 				if (self->recordMetrics()) {
@@ -689,6 +710,10 @@ struct TPCC : TestWorkload {
 					                           self->metrics.newOrderLatencies,
 					                           self->metrics.newOrderResponseTime,
 					                           "NewOrder");
+					TraceEvent("ZXD: Done a new order and record metric");
+				}
+				else{
+					TraceEvent("ZXD: Done a new order but didn't record metric");
 				}
 				wait(delay(18 + deterministicRandom()->random01() * 24));
 			}
