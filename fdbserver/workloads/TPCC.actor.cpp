@@ -638,7 +638,7 @@ struct TPCC : TestWorkload {
 					                           self->metrics.stockLevelResponseTime,
 					                           "StockLevel");
 				}
-				wait(delay(2 + deterministicRandom()->random01() * 10));
+//				wait(delay(2 + deterministicRandom()->random01() * 10));
 			} else if (type < 8) {
 				tx = delivery(self, cx, w_id);
 				bool committed = wait(tx);
@@ -651,7 +651,7 @@ struct TPCC : TestWorkload {
 					                           self->metrics.deliveryResponseTime,
 					                           "Delivery");
 				}
-				wait(delay(2 + deterministicRandom()->random01() * 10));
+//				wait(delay(2 + deterministicRandom()->random01() * 10));
 			} else if (type < 12) {
 				tx = orderStatus(self, cx, w_id);
 				bool committed = wait(tx);
@@ -664,7 +664,7 @@ struct TPCC : TestWorkload {
 					                           self->metrics.orderStatusResponseTime,
 					                           "OrderStatus");
 				}
-				wait(delay(2 + deterministicRandom()->random01() * 20));
+//				wait(delay(2 + deterministicRandom()->random01() * 20));
 			} else if (type < 55) {
 				tx = payment(self, cx, w_id);
 				bool committed = wait(tx);
@@ -677,7 +677,7 @@ struct TPCC : TestWorkload {
 					                           self->metrics.paymentResponseTime,
 					                           "Payment");
 				}
-				wait(delay(3 + deterministicRandom()->random01() * 24));
+//				wait(delay(3 + deterministicRandom()->random01() * 24));
 			} else {
 				tx = newOrder(self, cx, w_id);
 				bool committed = wait(tx);
@@ -690,7 +690,7 @@ struct TPCC : TestWorkload {
 					                           self->metrics.newOrderResponseTime,
 					                           "NewOrder");
 				}
-				wait(delay(18 + deterministicRandom()->random01() * 24));
+//				wait(delay(18 + deterministicRandom()->random01() * 24));
 			}
 		}
 	}
