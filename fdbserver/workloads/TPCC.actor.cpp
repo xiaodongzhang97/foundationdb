@@ -750,7 +750,7 @@ struct TPCC : TestWorkload {
 		state int cnt;
 		state vector<Future<Void>> emulatedUsers;
 		for (w_id = startWID; w_id < endWID; ++w_id) {
-			for (cnt = 0; cnt < clientsPerWarehouse; ++cnt) {
+			for (cnt = 0; cnt < self->clientsPerWarehouse; ++cnt) {
 				emulatedUsers.push_back(
 				    timeout(emulatedUser(self, cx, w_id, (d_id++) % 10), self->testDuration, Void()));
 			}
