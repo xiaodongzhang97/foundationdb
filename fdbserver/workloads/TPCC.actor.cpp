@@ -107,11 +107,14 @@ struct TPCCMetrics {
 struct TPCC : TestWorkload {
 	static constexpr const char* DESCRIPTION = "TPCC";
 
-	int warehousesPerClient;
+	int warehousesNum;
+	int clientProcessesUsed;
+	int warehousesPerClientProcess;
+	int clientsUsed;
+	int clientsPerWarehouse;
 	int expectedTransactionsPerMinute;
 	int testDuration;
 	int warmupTime;
-	int clientsUsed;
 	double startTime;
 
 	GlobalState gState;
@@ -119,11 +122,14 @@ struct TPCC : TestWorkload {
 
 	TPCC(WorkloadContext const& ctx) : TestWorkload(ctx) {
 		std::string workloadName = DESCRIPTION;
-		warehousesPerClient = getOption(options, LiteralStringRef("warehousesPerClient"), 100);
-		expectedTransactionsPerMinute = getOption(options, LiteralStringRef("expectedTransactionsPerMinute"), 1000);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600);
-		warmupTime = getOption(options, LiteralStringRef("warmupTime"), 30);
-		clientsUsed = getOption(options, LiteralStringRef("clientsUsed"), 40);
+		warehousesNum = getOption(options, LiteralStringRef("warehousesNum"), 16);
+		clientsUsed = getOption(options, LiteralStringRef("clientsUsed"), 16);
+		clientProcessesUsed = getOption(options, LiteralStringRef("clientProcessesUsed"), 8);
+		warehousesPerClientProcess = warehousesNum / clientProcessesUsed;
+		clientsPerWarehouse = clientsUsed / warehousesNum;
+		expectedTransactionsPerMinute = getOption(options, LiteralStringRef("expectedTransactionsPerMinute"), 1);
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 300);
+		warmupTime = getOption(options, LiteralStringRef("warmupTime"), 60);
 	}
 
 	int NURand(int C, int A, int x, int y) {
@@ -236,8 +242,7 @@ struct TPCC : TestWorkload {
 				orderLine.ol_i_id = self->NURand(self->gState.CRun, 8191, 1, 100000) - 1;
 				orderLine.ol_quantity = deterministicRandom()->randomInt(1, 11);
 				if (deterministicRandom()->randomInt(0, 100) == 0) {
-					orderLine.ol_supply_w_id =
-					    deterministicRandom()->randomInt(0, self->clientsUsed * self->warehousesPerClient);
+					orderLine.ol_supply_w_id = deterministicRandom()->randomInt(0, self->warehousesNum);
 				}
 				state Item item;
 				item.i_id = orderLine.ol_i_id;
@@ -336,7 +341,7 @@ struct TPCC : TestWorkload {
 		result.c_d_id = d_id;
 		if (deterministicRandom()->randomInt(0, 100) >= 85) {
 			result.c_d_id = deterministicRandom()->randomInt(0, 10);
-			result.c_w_id = deterministicRandom()->randomInt(0, self->clientsUsed * self->warehousesPerClient);
+			result.c_w_id = deterministicRandom()->randomInt(0, self->warehousesNum);
 		}
 		if (deterministicRandom()->randomInt(0, 100) < 60) {
 			// select through last name
@@ -623,11 +628,12 @@ struct TPCC : TestWorkload {
 		TraceEvent("StartingEmulatedUser").detail("Warehouse", w_id).detail("District", d_id);
 		loop {
 			auto type = deterministicRandom()->randomInt(0, 100);
+			state Future<bool> tx;
 			state double txnStartTime = g_network->now();
 
 			if (type < 4) {
 				loop {
-					Future<bool> tx = stockLevel(self, cx, w_id, d_id);
+					tx = stockLevel(self, cx, w_id, d_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
@@ -645,7 +651,7 @@ struct TPCC : TestWorkload {
 				}
 			} else if (type < 8) {
 				loop {
-					Future<bool> tx = delivery(self, cx, w_id);
+					tx = delivery(self, cx, w_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
@@ -663,7 +669,7 @@ struct TPCC : TestWorkload {
 				}
 			} else if (type < 12) {
 				loop {
-					Future<bool> tx = orderStatus(self, cx, w_id);
+					tx = orderStatus(self, cx, w_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
@@ -681,7 +687,7 @@ struct TPCC : TestWorkload {
 				}
 			} else if (type < 55) {
 				loop {
-					Future<bool> tx = payment(self, cx, w_id);
+					tx = payment(self, cx, w_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
@@ -699,7 +705,7 @@ struct TPCC : TestWorkload {
 				}
 			} else {
 				loop {
-					Future<bool> tx = newOrder(self, cx, w_id);
+					tx = newOrder(self, cx, w_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
@@ -729,7 +735,7 @@ struct TPCC : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) override {
-		if (clientId >= clientsUsed)
+		if (clientId >= clientProcessesUsed)
 			return Void();
 		return _start(cx, this);
 	}
@@ -737,14 +743,16 @@ struct TPCC : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, TPCC* self) {
 		wait(readGlobalState(self, cx));
 		self->startTime = g_network->now();
-		int startWID = self->clientId * self->warehousesPerClient;
-		int endWID = startWID + self->warehousesPerClient;
+		int startWID = self->clientId * self->warehousesPerClientProcess;
+		int endWID = startWID + self->warehousesPerClientProcess;
 		state int w_id;
-		state int d_id;
+		state int d_id = 0;
+		state int cnt;
 		state vector<Future<Void>> emulatedUsers;
 		for (w_id = startWID; w_id < endWID; ++w_id) {
-			for (d_id = 0; d_id < 10; ++d_id) {
-				emulatedUsers.push_back(timeout(emulatedUser(self, cx, w_id, d_id), self->testDuration, Void()));
+			for (cnt = 0; cnt < clientsPerWarehouse; ++cnt) {
+				emulatedUsers.push_back(
+				    timeout(emulatedUser(self, cx, w_id, (d_id++) % 10), self->testDuration, Void()));
 			}
 		}
 		wait(waitForAll(emulatedUsers));
@@ -755,7 +763,7 @@ struct TPCC : TestWorkload {
 		return (transactionsPerMinute() > expectedTransactionsPerMinute);
 	}
 	virtual void getMetrics(vector<PerfMetric>& m) override {
-		double multiplier = static_cast<double>(clientCount) / static_cast<double>(clientsUsed);
+		double multiplier = static_cast<double>(clientCount) / static_cast<double>(clientProcessesUsed);
 
 		m.push_back(PerfMetric("Transactions Per Minute", transactionsPerMinute(), false));
 
@@ -773,27 +781,27 @@ struct TPCC : TestWorkload {
 		m.push_back(PerfMetric("Failed NewOrder Transactions", metrics.failedNewOrderTransactions, false));
 
 		m.push_back(PerfMetric("Mean StockLevel Latency",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.stockLevelResponseTime /
+		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.stockLevelResponseTime /
 		                                                   metrics.successfulStockLevelTransactions)
 		                                                : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean Delivery Latency",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.deliveryResponseTime /
+		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.deliveryResponseTime /
 		                                                   metrics.successfulDeliveryTransactions)
 		                                                : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean OrderStatus Repsonse Time",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.orderStatusResponseTime /
+		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.orderStatusResponseTime /
 		                                                   metrics.successfulOrderStatusTransactions)
 		                                                : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean Payment Latency",
-		                       (clientId < clientsUsed)
+		                       (clientId < clientProcessesUsed)
 		                           ? (multiplier * metrics.paymentResponseTime / metrics.successfulPaymentTransactions)
 		                           : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean NewOrder Latency",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.newOrderResponseTime /
+		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.newOrderResponseTime /
 		                                                   metrics.successfulNewOrderTransactions)
 		                                                : 0.0,
 		                       true));
