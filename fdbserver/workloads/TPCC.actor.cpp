@@ -558,9 +558,9 @@ struct TPCC : TestWorkload {
 						serializer(w, customer);
 						tr.set(customer.key(), w.toValue());
 					}
-					wait(tr.commit());
 				}
 			}
+			wait(tr.commit());
 		} catch (Error& e) {
 			return false;
 		}
@@ -627,70 +627,95 @@ struct TPCC : TestWorkload {
 			state double txnStartTime = g_network->now();
 
 			if (type < 4) {
-				tx = stockLevel(self, cx, w_id, d_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulStockLevelTransactions,
-					                           self->metrics.failedStockLevelTransactions,
-					                           txnStartTime,
-					                           self->metrics.stockLevelLatencies,
-					                           self->metrics.stockLevelResponseTime,
-					                           "StockLevel");
+				loop {
+					tx = stockLevel(self, cx, w_id, d_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulStockLevelTransactions,
+						                           self->metrics.failedStockLevelTransactions,
+						                           txnStartTime,
+						                           self->metrics.stockLevelLatencies,
+						                           self->metrics.stockLevelResponseTime,
+						                           "StockLevel");
+					}
+					//				wait(delay(2 + deterministicRandom()->random01() * 10));
+					if (committed) {
+						break;
+					}
 				}
-//				wait(delay(2 + deterministicRandom()->random01() * 10));
 			} else if (type < 8) {
-				tx = delivery(self, cx, w_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulDeliveryTransactions,
-					                           self->metrics.failedDeliveryTransactions,
-					                           txnStartTime,
-					                           self->metrics.deliveryLatencies,
-					                           self->metrics.deliveryResponseTime,
-					                           "Delivery");
+				loop {
+					tx = delivery(self, cx, w_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulDeliveryTransactions,
+						                           self->metrics.failedDeliveryTransactions,
+						                           txnStartTime,
+						                           self->metrics.deliveryLatencies,
+						                           self->metrics.deliveryResponseTime,
+						                           "Delivery");
+					}
+					//				wait(delay(2 + deterministicRandom()->random01() * 10));
+					if (committed) {
+						break;
+					}
 				}
-//				wait(delay(2 + deterministicRandom()->random01() * 10));
 			} else if (type < 12) {
-				tx = orderStatus(self, cx, w_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulOrderStatusTransactions,
-					                           self->metrics.failedOrderStatusTransactions,
-					                           txnStartTime,
-					                           self->metrics.orderStatusLatencies,
-					                           self->metrics.orderStatusResponseTime,
-					                           "OrderStatus");
+				loop {
+					tx = orderStatus(self, cx, w_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulOrderStatusTransactions,
+						                           self->metrics.failedOrderStatusTransactions,
+						                           txnStartTime,
+						                           self->metrics.orderStatusLatencies,
+						                           self->metrics.orderStatusResponseTime,
+						                           "OrderStatus");
+					}
+					//				wait(delay(2 + deterministicRandom()->random01() * 20));
+					if (committed) {
+						break;
+					}
 				}
-//				wait(delay(2 + deterministicRandom()->random01() * 20));
 			} else if (type < 55) {
-				tx = payment(self, cx, w_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulPaymentTransactions,
-					                           self->metrics.failedPaymentTransactions,
-					                           txnStartTime,
-					                           self->metrics.paymentLatencies,
-					                           self->metrics.paymentResponseTime,
-					                           "Payment");
+				loop {
+					tx = payment(self, cx, w_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulPaymentTransactions,
+						                           self->metrics.failedPaymentTransactions,
+						                           txnStartTime,
+						                           self->metrics.paymentLatencies,
+						                           self->metrics.paymentResponseTime,
+						                           "Payment");
+					}
+					//				wait(delay(3 + deterministicRandom()->random01() * 24));
+					if (committed) {
+						break;
+					}
 				}
-//				wait(delay(3 + deterministicRandom()->random01() * 24));
 			} else {
-				tx = newOrder(self, cx, w_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulNewOrderTransactions,
-					                           self->metrics.failedNewOrderTransactions,
-					                           txnStartTime,
-					                           self->metrics.newOrderLatencies,
-					                           self->metrics.newOrderResponseTime,
-					                           "NewOrder");
+				loop {
+					tx = newOrder(self, cx, w_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulNewOrderTransactions,
+						                           self->metrics.failedNewOrderTransactions,
+						                           txnStartTime,
+						                           self->metrics.newOrderLatencies,
+						                           self->metrics.newOrderResponseTime,
+						                           "NewOrder");
+					}
+					//				wait(delay(18 + deterministicRandom()->random01() * 24));
+					if (committed) {
+						break;
+					}
 				}
-//				wait(delay(18 + deterministicRandom()->random01() * 24));
 			}
 		}
 	}
