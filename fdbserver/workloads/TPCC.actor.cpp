@@ -623,12 +623,11 @@ struct TPCC : TestWorkload {
 		TraceEvent("StartingEmulatedUser").detail("Warehouse", w_id).detail("District", d_id);
 		loop {
 			auto type = deterministicRandom()->randomInt(0, 100);
-			Future<bool> tx;
 			state double txnStartTime = g_network->now();
 
 			if (type < 4) {
 				loop {
-					tx = stockLevel(self, cx, w_id, d_id);
+					Future<bool> tx = stockLevel(self, cx, w_id, d_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
@@ -646,7 +645,7 @@ struct TPCC : TestWorkload {
 				}
 			} else if (type < 8) {
 				loop {
-					tx = delivery(self, cx, w_id);
+					Future<bool> tx = delivery(self, cx, w_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
@@ -664,7 +663,7 @@ struct TPCC : TestWorkload {
 				}
 			} else if (type < 12) {
 				loop {
-					tx = orderStatus(self, cx, w_id);
+					Future<bool> tx = orderStatus(self, cx, w_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
@@ -682,7 +681,7 @@ struct TPCC : TestWorkload {
 				}
 			} else if (type < 55) {
 				loop {
-					tx = payment(self, cx, w_id);
+					Future<bool> tx = payment(self, cx, w_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
@@ -700,7 +699,7 @@ struct TPCC : TestWorkload {
 				}
 			} else {
 				loop {
-					tx = newOrder(self, cx, w_id);
+					Future<bool> tx = newOrder(self, cx, w_id);
 					bool committed = wait(tx);
 					if (self->recordMetrics()) {
 						TPCCMetrics::updateMetrics(committed,
