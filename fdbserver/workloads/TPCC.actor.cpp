@@ -243,7 +243,7 @@ struct TPCC : TestWorkload {
 				orderLine.ol_o_id = order.o_id;
 				orderLine.ol_i_id = self->NURand(self->gState.CRun, 8191, 1, 100000) - 1;
 				orderLine.ol_quantity = deterministicRandom()->randomInt(1, 11);
-				if (deterministicRandom()->randomInt(0, 100) < remoteProbability) {
+				if (deterministicRandom()->randomInt(0, 100) < self->remoteProbability) {
 					orderLine.ol_supply_w_id = deterministicRandom()->randomInt(0, self->warehousesNum);
 				}
 				state Item item;
