@@ -745,8 +745,27 @@ struct TPCC : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, TPCC* self) {
 		wait(readGlobalState(self, cx));
 		self->startTime = g_network->now();
-		int startWID = self->clientId * self->warehousesPerClientProcess;
-		int endWID = startWID + self->warehousesPerClientProcess;
+		int startWID, endWID;
+		int remain = self->warehousesNum - self->warehousesPerClientProcess * self->clientProcessesUsed;
+		if(self->clientId < remain){
+			startWID = self->clientId * (self->warehousesPerClientProcess + 1);
+			endWID = startWID + self->warehousesPerClientProcess + 1;
+		}
+		else{
+			startWID = remain * (self->warehousesPerClientProcess + 1) +
+			           (self->clientId - remain) * self->warehousesPerClientProcess;
+			endWID = startWID + self->warehousesPerClientProcess;
+		}
+		TraceEvent("Start a Client Process")
+			.details("warehousesNum", self->warehousesNum)
+			.details("clientsProcessesUsed", self->clientProcessesUsed)
+			.details("warehousesPerClientProcess", self->warehousesPerClientProcess)
+			.details("remain", remain)
+		    .details("clientId", self->clientId)
+		    .details("startWID", startWID)
+		    .details("endWID", endWID);
+		ASSERT(remain >= 0);
+		ASSERT(endWID <= self->warehousesNum);
 		state int w_id;
 		state int d_id = 0;
 		state int cnt;
