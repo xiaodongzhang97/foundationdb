@@ -757,13 +757,13 @@ struct TPCC : TestWorkload {
 			endWID = startWID + self->warehousesPerClientProcess;
 		}
 		TraceEvent("Start a Client Process")
-			.details("warehousesNum", self->warehousesNum)
-			.details("clientsProcessesUsed", self->clientProcessesUsed)
-			.details("warehousesPerClientProcess", self->warehousesPerClientProcess)
-			.details("remain", remain)
-		    .details("clientId", self->clientId)
-		    .details("startWID", startWID)
-		    .details("endWID", endWID);
+			.detail("warehousesNum", self->warehousesNum)
+			.detail("clientsProcessesUsed", self->clientProcessesUsed)
+			.detail("warehousesPerClientProcess", self->warehousesPerClientProcess)
+			.detail("remain", remain)
+		    .detail("clientId", self->clientId)
+		    .detail("startWID", startWID)
+		    .detail("endWID", endWID);
 		ASSERT(remain >= 0);
 		ASSERT(endWID <= self->warehousesNum);
 		state int w_id;
