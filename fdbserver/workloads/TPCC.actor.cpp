@@ -633,7 +633,7 @@ struct TPCC : TestWorkload {
 			state Future<bool> tx;
 			state double txnStartTime = g_network->now();
 
-			if (type < 4) {
+			if (type < 0) {
 				loop {
 					tx = stockLevel(self, cx, w_id, d_id);
 					bool committed = wait(tx);
@@ -651,7 +651,7 @@ struct TPCC : TestWorkload {
 						break;
 					}
 				}
-			} else if (type < 8) {
+			} else if (type < 0) {
 				loop {
 					tx = delivery(self, cx, w_id);
 					bool committed = wait(tx);
@@ -669,7 +669,7 @@ struct TPCC : TestWorkload {
 						break;
 					}
 				}
-			} else if (type < 12) {
+			} else if (type < 0) {
 				loop {
 					tx = orderStatus(self, cx, w_id);
 					bool committed = wait(tx);
@@ -687,7 +687,7 @@ struct TPCC : TestWorkload {
 						break;
 					}
 				}
-			} else if (type < 55) {
+			} else if (type < 0) {
 				loop {
 					tx = payment(self, cx, w_id);
 					bool committed = wait(tx);
