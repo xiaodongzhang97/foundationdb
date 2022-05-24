@@ -186,43 +186,43 @@ struct TPCC : TestWorkload {
 			warehouse.w_id = w_id;
 			Optional<Value> wValue = wait(tr.get(warehouse.key()));
 			ASSERT(wValue.present());
-			{
-				BinaryReader r(wValue.get(), IncludeVersion());
-				serializer(r, warehouse);
-			}
+//			{
+//				BinaryReader r(wValue.get(), IncludeVersion());
+//				serializer(r, warehouse);
+//			}
 			state District district;
 			district.d_w_id = w_id;
 			district.d_id = d_id;
 			Optional<Value> dValue = wait(tr.get(district.key()));
 			ASSERT(dValue.present());
-			{
-				BinaryReader r(dValue.get(), IncludeVersion());
-				serializer(r, district);
-			}
+//			{
+//				BinaryReader r(dValue.get(), IncludeVersion());
+//				serializer(r, district);
+//			}
 			state Customer customer;
 			customer.c_id = c_id;
 			customer.c_w_id = w_id;
 			customer.c_d_id = d_id;
 			Optional<Value> cValue = wait(tr.get(customer.key()));
 			ASSERT(cValue.present());
-			{
-				BinaryReader r(cValue.get(), IncludeVersion());
-				serializer(r, customer);
-			}
+//			{
+//				BinaryReader r(cValue.get(), IncludeVersion());
+//				serializer(r, customer);
+//			}
 			state Order order;
 			order.o_entry_d = g_network->now();
 			order.o_c_id = c_id;
 			order.o_d_id = d_id;
 			order.o_w_id = w_id;
 			order.o_ol_cnt = ol_cnt;
-			order.o_id = district.d_next_o_id;
-
-			++district.d_next_o_id;
-			{
-				BinaryWriter w(IncludeVersion());
-				serializer(w, district);
-				tr.set(district.key(), w.toValue());
-			}
+//			order.o_id = district.d_next_o_id;
+//
+//			++district.d_next_o_id;
+//			{
+//				BinaryWriter w(IncludeVersion());
+//				serializer(w, district);
+//				tr.set(district.key(), w.toValue());
+//			}
 
 			state NewOrder newOrder;
 			newOrder.no_w_id = w_id;
@@ -251,85 +251,85 @@ struct TPCC : TestWorkload {
 				orderLine.ol_i_id = item.i_id;
 				Optional<Value> iValue = wait(tr.get(item.key()));
 				ASSERT(iValue.present());
-				{
-					BinaryReader r(iValue.get(), IncludeVersion());
-					serializer(r, item);
-				}
+//				{
+//					BinaryReader r(iValue.get(), IncludeVersion());
+//					serializer(r, item);
+//				}
 				state Stock stock;
 				stock.s_i_id = item.i_id;
 				stock.s_w_id = orderLine.ol_supply_w_id;
 				Optional<Value> sValue = wait(tr.get(stock.key()));
 				ASSERT(sValue.present());
-				{
-					BinaryReader r(sValue.get(), IncludeVersion());
-					serializer(r, stock);
-				}
-				if (stock.s_quantity - orderLine.ol_quantity >= 10) {
-					stock.s_quantity -= orderLine.ol_quantity;
-				} else {
-					stock.s_quantity = (stock.s_quantity - orderLine.ol_quantity) + 91;
-				}
-				stock.s_ytd += orderLine.ol_quantity;
-				stock.s_order_cnt += 1;
-				if (orderLine.ol_supply_w_id != w_id) {
-					stock.s_remote_cnt += 1;
-					allLocal = false;
-				}
-				{
-					BinaryWriter w(IncludeVersion());
-					serializer(w, stock);
-					tr.set(stock.key(), w.toValue());
-				}
-				orderLine.ol_amount = orderLine.ol_quantity * item.i_price;
-				switch (orderLine.ol_d_id) {
-				case 0:
-					orderLine.ol_dist_info = stock.s_dist_01;
-					break;
-				case 1:
-					orderLine.ol_dist_info = stock.s_dist_02;
-					break;
-				case 2:
-					orderLine.ol_dist_info = stock.s_dist_03;
-					break;
-				case 3:
-					orderLine.ol_dist_info = stock.s_dist_04;
-					break;
-				case 4:
-					orderLine.ol_dist_info = stock.s_dist_05;
-					break;
-				case 5:
-					orderLine.ol_dist_info = stock.s_dist_06;
-					break;
-				case 6:
-					orderLine.ol_dist_info = stock.s_dist_07;
-					break;
-				case 7:
-					orderLine.ol_dist_info = stock.s_dist_08;
-					break;
-				case 8:
-					orderLine.ol_dist_info = stock.s_dist_09;
-					break;
-				case 9:
-					orderLine.ol_dist_info = stock.s_dist_10;
-					break;
-				}
-				{
-					BinaryWriter w(IncludeVersion());
-					serializer(w, orderLine);
-					tr.set(orderLine.key(), w.toValue());
-				}
+//				{
+//					BinaryReader r(sValue.get(), IncludeVersion());
+//					serializer(r, stock);
+//				}
+//				if (stock.s_quantity - orderLine.ol_quantity >= 10) {
+//					stock.s_quantity -= orderLine.ol_quantity;
+//				} else {
+//					stock.s_quantity = (stock.s_quantity - orderLine.ol_quantity) + 91;
+//				}
+//				stock.s_ytd += orderLine.ol_quantity;
+//				stock.s_order_cnt += 1;
+//				if (orderLine.ol_supply_w_id != w_id) {
+//					stock.s_remote_cnt += 1;
+//					allLocal = false;
+//				}
+//				{
+//					BinaryWriter w(IncludeVersion());
+//					serializer(w, stock);
+//					tr.set(stock.key(), w.toValue());
+//				}
+//				orderLine.ol_amount = orderLine.ol_quantity * item.i_price;
+//				switch (orderLine.ol_d_id) {
+//				case 0:
+//					orderLine.ol_dist_info = stock.s_dist_01;
+//					break;
+//				case 1:
+//					orderLine.ol_dist_info = stock.s_dist_02;
+//					break;
+//				case 2:
+//					orderLine.ol_dist_info = stock.s_dist_03;
+//					break;
+//				case 3:
+//					orderLine.ol_dist_info = stock.s_dist_04;
+//					break;
+//				case 4:
+//					orderLine.ol_dist_info = stock.s_dist_05;
+//					break;
+//				case 5:
+//					orderLine.ol_dist_info = stock.s_dist_06;
+//					break;
+//				case 6:
+//					orderLine.ol_dist_info = stock.s_dist_07;
+//					break;
+//				case 7:
+//					orderLine.ol_dist_info = stock.s_dist_08;
+//					break;
+//				case 8:
+//					orderLine.ol_dist_info = stock.s_dist_09;
+//					break;
+//				case 9:
+//					orderLine.ol_dist_info = stock.s_dist_10;
+//					break;
+//				}
+//				{
+//					BinaryWriter w(IncludeVersion());
+//					serializer(w, orderLine);
+//					tr.set(orderLine.key(), w.toValue());
+//				}
 			}
-			order.o_all_local = allLocal;
-			{
-				BinaryWriter w(IncludeVersion());
-				serializer(w, order);
-				tr.set(order.key(), w.toValue());
-			}
-			{
-				BinaryWriter w(IncludeVersion());
-				serializer(w, newOrder);
-				tr.set(newOrder.key(), w.toValue());
-			}
+//			order.o_all_local = allLocal;
+//			{
+//				BinaryWriter w(IncludeVersion());
+//				serializer(w, order);
+//				tr.set(order.key(), w.toValue());
+//			}
+//			{
+//				BinaryWriter w(IncludeVersion());
+//				serializer(w, newOrder);
+//				tr.set(newOrder.key(), w.toValue());
+//			}
 			wait(tr.commit());
 		} catch (Error& e) {
 			return false;
