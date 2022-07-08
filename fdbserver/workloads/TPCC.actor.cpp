@@ -129,7 +129,7 @@ struct TPCC : TestWorkload {
 		clientProcessesUsed = getOption(options, LiteralStringRef("clientProcessesUsed"), 8);
 		warehousesPerClientProcess = warehousesNum / clientProcessesUsed;
 		clientsPerWarehouse = clientsUsed / warehousesNum;
-		appendClientsProbability = 100 * ((double)clientsUse / (double)warehousesNum - clientsPerWarehouse);
+		appendClientsProbability = 100 * ((double)clientsUsed / (double)warehousesNum - clientsPerWarehouse);
 		remoteProbability = getOption(options, LiteralStringRef("remoteProbability"), 1);
 		expectedTransactionsPerMinute = getOption(options, LiteralStringRef("expectedTransactionsPerMinute"), 1);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 300);
