@@ -112,6 +112,7 @@ struct TPCC : TestWorkload {
 	int warehousesPerClientProcess;
 	int clientsUsed;
 	int clientsPerWarehouse;
+	double appendClientsProbability;
 	int expectedTransactionsPerMinute;
 	int testDuration;
 	int warmupTime;
@@ -128,7 +129,8 @@ struct TPCC : TestWorkload {
 		clientProcessesUsed = getOption(options, LiteralStringRef("clientProcessesUsed"), 8);
 		warehousesPerClientProcess = warehousesNum / clientProcessesUsed;
 		clientsPerWarehouse = clientsUsed / warehousesNum;
-		remoteProbability =  getOption(options, LiteralStringRef("remoteProbability"), 1);
+		appendClientsProbability = 100 * ((double)clientsUse / (double)warehousesNum - clientsPerWarehouse);
+		remoteProbability = getOption(options, LiteralStringRef("remoteProbability"), 1);
 		expectedTransactionsPerMinute = getOption(options, LiteralStringRef("expectedTransactionsPerMinute"), 1);
 		testDuration = getOption(options, LiteralStringRef("testDuration"), 300);
 		warmupTime = getOption(options, LiteralStringRef("warmupTime"), 60);
@@ -747,20 +749,19 @@ struct TPCC : TestWorkload {
 		self->startTime = g_network->now();
 		int startWID, endWID;
 		int remain = self->warehousesNum - self->warehousesPerClientProcess * self->clientProcessesUsed;
-		if(self->clientId < remain){
+		if (self->clientId < remain) {
 			startWID = self->clientId * (self->warehousesPerClientProcess + 1);
 			endWID = startWID + self->warehousesPerClientProcess + 1;
-		}
-		else{
+		} else {
 			startWID = remain * (self->warehousesPerClientProcess + 1) +
 			           (self->clientId - remain) * self->warehousesPerClientProcess;
 			endWID = startWID + self->warehousesPerClientProcess;
 		}
 		TraceEvent("Start a Client Process")
-			.detail("warehousesNum", self->warehousesNum)
-			.detail("clientsProcessesUsed", self->clientProcessesUsed)
-			.detail("warehousesPerClientProcess", self->warehousesPerClientProcess)
-			.detail("remain", remain)
+		    .detail("warehousesNum", self->warehousesNum)
+		    .detail("clientsProcessesUsed", self->clientProcessesUsed)
+		    .detail("warehousesPerClientProcess", self->warehousesPerClientProcess)
+		    .detail("remain", remain)
 		    .detail("clientId", self->clientId)
 		    .detail("startWID", startWID)
 		    .detail("endWID", endWID);
@@ -772,6 +773,10 @@ struct TPCC : TestWorkload {
 		state vector<Future<Void>> emulatedUsers;
 		for (w_id = startWID; w_id < endWID; ++w_id) {
 			for (cnt = 0; cnt < self->clientsPerWarehouse; ++cnt) {
+				emulatedUsers.push_back(
+				    timeout(emulatedUser(self, cx, w_id, (d_id++) % 10), self->testDuration, Void()));
+			}
+			if (deterministicRandom()->randomInt(0, 100) < self->appendClientsProbability) {
 				emulatedUsers.push_back(
 				    timeout(emulatedUser(self, cx, w_id, (d_id++) % 10), self->testDuration, Void()));
 			}
@@ -803,18 +808,18 @@ struct TPCC : TestWorkload {
 
 		m.push_back(PerfMetric("Mean StockLevel Latency",
 		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.stockLevelResponseTime /
-		                                                   metrics.successfulStockLevelTransactions)
-		                                                : 0.0,
+		                                                           metrics.successfulStockLevelTransactions)
+		                                                        : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean Delivery Latency",
 		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.deliveryResponseTime /
-		                                                   metrics.successfulDeliveryTransactions)
-		                                                : 0.0,
+		                                                           metrics.successfulDeliveryTransactions)
+		                                                        : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean OrderStatus Repsonse Time",
 		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.orderStatusResponseTime /
-		                                                   metrics.successfulOrderStatusTransactions)
-		                                                : 0.0,
+		                                                           metrics.successfulOrderStatusTransactions)
+		                                                        : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean Payment Latency",
 		                       (clientId < clientProcessesUsed)
@@ -823,8 +828,8 @@ struct TPCC : TestWorkload {
 		                       true));
 		m.push_back(PerfMetric("Mean NewOrder Latency",
 		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.newOrderResponseTime /
-		                                                   metrics.successfulNewOrderTransactions)
-		                                                : 0.0,
+		                                                           metrics.successfulNewOrderTransactions)
+		                                                        : 0.0,
 		                       true));
 
 		metrics.sort();
