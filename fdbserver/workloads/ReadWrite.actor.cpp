@@ -22,6 +22,7 @@
 #include <utility>
 #include <vector>
 
+#include "myzipf.h"
 #include "fdbrpc/ContinuousSample.h"
 #include "fdbclient/NativeAPI.actor.h"
 #include "fdbserver/TesterInterface.actor.h"
@@ -80,9 +81,10 @@ struct ReadWriteWorkload : KVWorkload {
 	int readsPerTransactionB, writesPerTransactionB;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
 	double testDuration, transactionsPerSecond, alpha, warmingDelay, loadTime, maxInsertRate, debugInterval, debugTime;
-	double metricsStart, metricsDuration, clientBegin;
+	double metricsStart, metricsDuration, clientBegin, zipfConstant;
 	std::string valueString;
 
+	bool zipf;
 	bool dependentReads;
 	bool enableReadLatencyLogging;
 	double periodicLoggingInterval;
@@ -98,7 +100,7 @@ struct ReadWriteWorkload : KVWorkload {
 	bool rampTransactionType;
 	bool rampUpConcurrency;
 	bool batchPriority;
-
+	ZipfianGenerator* myzipf;
 	Standalone<StringRef> descriptionString;
 
 	Int64MetricHandle totalReadsMetric;
@@ -137,6 +139,9 @@ struct ReadWriteWorkload : KVWorkload {
 		actorCount = ceil(transactionsPerSecond * allowedLatency);
 		actorCount = getOption(options, LiteralStringRef("actorCountPerTester"), actorCount);
 
+		zipf = getOption(options, LiteralStringRef("zipf"), false);
+		zipfConstant = getOption(options, LiteralStringRef("zipfConstant"), 0.99);
+
 		readsPerTransactionA = getOption(options, LiteralStringRef("readsPerTransactionA"), 10);
 		writesPerTransactionA = getOption(options, LiteralStringRef("writesPerTransactionA"), 0);
 		readsPerTransactionB = getOption(options, LiteralStringRef("readsPerTransactionB"), 1);
@@ -151,6 +156,10 @@ struct ReadWriteWorkload : KVWorkload {
 		valueString = std::string(maxValueBytes, '.');
 		if (nodePrefix > 0) {
 			keyBytes += 16;
+		}
+
+		if (zipf) {
+			myzipf = new ZipfianGenerator(0, nodeCount, zipfConstant);
 		}
 
 		metricsStart = getOption(options, LiteralStringRef("metricsStart"), 0.0);
@@ -616,11 +625,15 @@ struct ReadWriteWorkload : KVWorkload {
 	}
 
 	int64_t getRandomKey(uint64_t nodeCount) {
-		if (forceHotProbability && deterministicRandom()->random01() < forceHotProbability)
-			return deterministicRandom()->randomInt64(0, nodeCount * hotKeyFraction) /
-			       hotKeyFraction; // spread hot keys over keyspace
-		else
-			return deterministicRandom()->randomInt64(0, nodeCount);
+		if (zipf) {
+			return myzipf->nextValue();
+		} else {
+			if (forceHotProbability && deterministicRandom()->random01() < forceHotProbability)
+				return deterministicRandom()->randomInt64(0, nodeCount * hotKeyFraction) /
+				       hotKeyFraction; // spread hot keys over keyspace
+			else
+				return deterministicRandom()->randomInt64(0, nodeCount);
+		}
 	}
 
 	double sweepAlpha(double startTime) {
@@ -677,9 +690,16 @@ struct ReadWriteWorkload : KVWorkload {
 				state int writes = aTransaction ? self->writesPerTransactionA : self->writesPerTransactionB;
 				state int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
 				state int extra_write_conflict_ranges = writes ? self->extraWriteConflictRangesPerTransaction : 0;
+				state std::set<int64_t> exist_keys;
 				if (!self->adjacentReads) {
-					for (int op = 0; op < reads; op++)
-						keys.push_back(self->getRandomKey(self->nodeCount));
+					for (int op = 0; op < reads; op++) {
+						state int64_t rk = self->getRandomKey(self->nodeCount);
+						while (exist_keys.find(rk) != exist_keys.end()) {
+							rk = self->getRandomKey(self->nodeCount);
+						}
+						exist_keys.insert(rk);
+						keys.push_back(rk);
+					}
 				} else {
 					int startKey = self->getRandomKey(self->nodeCount - reads);
 					for (int op = 0; op < reads; op++)
@@ -740,8 +760,14 @@ struct ReadWriteWorkload : KVWorkload {
 							for (int op = 0; op < writes; op++)
 								tr.set(self->keyForIndex(startKey + op, false), values[op]);
 						} else {
-							for (int op = 0; op < writes; op++)
-								tr.set(self->keyForIndex(self->getRandomKey(self->nodeCount), false), values[op]);
+							for (int op = 0; op < writes; op++) {
+								state int64_t wk = self->getRandomKey(self->nodeCount);
+								while (exist_keys.find(wk) != exist_keys.end()) {
+									wk = self->getRandomKey(self->nodeCount);
+								}
+								exist_keys.insert(wk);
+								tr.set(self->keyForIndex(wk, false), values[op]);
+							}
 						}
 						for (int op = 0; op < extra_read_conflict_ranges; op++)
 							tr.addReadConflictRange(extra_ranges[op]);

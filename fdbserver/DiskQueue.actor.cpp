@@ -353,7 +353,7 @@ public:
 					toSync->push_back(self->files[1].syncQueue);
 					/*TraceEvent("RDQWriteAndSwap", this->dbgid).detail("File1name", self->files[1].dbgFilename).detail("File1size", self->files[1].size)
 					    .detail("WritingPos", self->writingPos).detail("WritingBytes", p);*/
-					waitfor.push_back(self->files[1].f->write(pageData.begin(), p, self->writingPos));
+					self->files[1].f->write(pageData.begin(), p, self->writingPos);
 					pageData = pageData.substr(p);
 				}
 
@@ -382,7 +382,7 @@ public:
 						    .detail("ElidedTruncateSize", maxShrink);
 						Reference<IAsyncFile> newFile = wait(replaceFile(self->files[1].f));
 						self->files[1].setFile(newFile);
-						waitfor.push_back(self->files[1].f->truncate(self->fileExtensionBytes));
+						self->files[1].f->truncate(self->fileExtensionBytes);
 						self->files[1].size = self->fileExtensionBytes;
 					} else {
 						const int64_t startingSize = self->files[1].size;
@@ -392,7 +392,7 @@ public:
 						    .detail("Filename", self->files[1].f->getFilename())
 						    .detail("OldFileSize", startingSize)
 						    .detail("NewFileSize", self->files[1].size);
-						waitfor.push_back(self->files[1].f->truncate(self->files[1].size));
+						self->files[1].f->truncate(self->files[1].size);
 					}
 				}
 			} else {
@@ -403,7 +403,7 @@ public:
 				int64_t minExtension = pageData.size() + self->writingPos - self->files[1].size;
 				self->files[1].size += std::min(std::max(self->fileExtensionBytes, minExtension),
 				                                self->files[0].size + self->files[1].size + minExtension);
-				waitfor.push_back(self->files[1].f->truncate(self->files[1].size));
+				self->files[1].f->truncate(self->files[1].size);
 
 				if (self->fileSizeWarningLimit > 0 && self->files[1].size > self->fileSizeWarningLimit) {
 					TraceEvent(SevWarnAlways, "DiskQueueFileTooLarge", self->dbgid)
@@ -421,7 +421,7 @@ public:
 		    .detail("WritingPos", self->writingPos).detail("WritingBytes", pageData.size());*/
 		self->files[1].size = std::max(self->files[1].size, self->writingPos + pageData.size());
 		toSync->push_back(self->files[1].syncQueue);
-		waitfor.push_back(self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos));
+		self->files[1].f->write(pageData.begin(), pageData.size(), self->writingPos);
 		self->writingPos += pageData.size();
 
 		return waitForAll(waitfor);
@@ -457,11 +457,11 @@ public:
 
 			TEST(pageData.size() > sizeof(Page)); // push more than one page of data
 
-			Future<Void> pushed = wait(self->push(pageData, &syncFiles));
+			self->push(pageData, &syncFiles);
 			pushing.send(Void());
 			ASSERT(syncFiles.size() >= 1 && syncFiles.size() <= 2);
 			TEST(2 == syncFiles.size()); // push spans both files
-			wait(pushed);
+//			wait(pushed);
 
 			delete pageMem;
 			pageMem = 0;

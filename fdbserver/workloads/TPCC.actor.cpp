@@ -107,23 +107,33 @@ struct TPCCMetrics {
 struct TPCC : TestWorkload {
 	static constexpr const char* DESCRIPTION = "TPCC";
 
-	int warehousesPerClient;
+	int warehousesNum;
+	int clientProcessesUsed;
+	int warehousesPerClientProcess;
+	int clientsUsed;
+	int clientsPerWarehouse;
+	double appendClientsProbability;
 	int expectedTransactionsPerMinute;
 	int testDuration;
 	int warmupTime;
-	int clientsUsed;
 	double startTime;
+	int remoteProbability;
 
 	GlobalState gState;
 	TPCCMetrics metrics;
 
 	TPCC(WorkloadContext const& ctx) : TestWorkload(ctx) {
 		std::string workloadName = DESCRIPTION;
-		warehousesPerClient = getOption(options, LiteralStringRef("warehousesPerClient"), 100);
-		expectedTransactionsPerMinute = getOption(options, LiteralStringRef("expectedTransactionsPerMinute"), 1000);
-		testDuration = getOption(options, LiteralStringRef("testDuration"), 600);
-		warmupTime = getOption(options, LiteralStringRef("warmupTime"), 30);
-		getOption(options, LiteralStringRef("clientsUsed"), 40);
+		warehousesNum = getOption(options, LiteralStringRef("warehousesNum"), 16);
+		clientsUsed = getOption(options, LiteralStringRef("clientsUsed"), 16);
+		clientProcessesUsed = getOption(options, LiteralStringRef("clientProcessesUsed"), 8);
+		warehousesPerClientProcess = warehousesNum / clientProcessesUsed;
+		clientsPerWarehouse = clientsUsed / warehousesNum;
+		appendClientsProbability = 100 * ((double)clientsUsed / (double)warehousesNum - clientsPerWarehouse);
+		remoteProbability = getOption(options, LiteralStringRef("remoteProbability"), 1);
+		expectedTransactionsPerMinute = getOption(options, LiteralStringRef("expectedTransactionsPerMinute"), 1);
+		testDuration = getOption(options, LiteralStringRef("testDuration"), 300);
+		warmupTime = getOption(options, LiteralStringRef("warmupTime"), 60);
 	}
 
 	int NURand(int C, int A, int x, int y) {
@@ -235,9 +245,8 @@ struct TPCC : TestWorkload {
 				orderLine.ol_o_id = order.o_id;
 				orderLine.ol_i_id = self->NURand(self->gState.CRun, 8191, 1, 100000) - 1;
 				orderLine.ol_quantity = deterministicRandom()->randomInt(1, 11);
-				if (deterministicRandom()->randomInt(0, 100) == 0) {
-					orderLine.ol_supply_w_id =
-					    deterministicRandom()->randomInt(0, self->clientsUsed * self->warehousesPerClient);
+				if (deterministicRandom()->randomInt(0, 100) < self->remoteProbability) {
+					orderLine.ol_supply_w_id = deterministicRandom()->randomInt(0, self->warehousesNum);
 				}
 				state Item item;
 				item.i_id = orderLine.ol_i_id;
@@ -336,7 +345,7 @@ struct TPCC : TestWorkload {
 		result.c_d_id = d_id;
 		if (deterministicRandom()->randomInt(0, 100) >= 85) {
 			result.c_d_id = deterministicRandom()->randomInt(0, 10);
-			result.c_w_id = deterministicRandom()->randomInt(0, self->clientsUsed * self->warehousesPerClient);
+			result.c_w_id = deterministicRandom()->randomInt(0, self->warehousesNum);
 		}
 		if (deterministicRandom()->randomInt(0, 100) < 60) {
 			// select through last name
@@ -558,9 +567,9 @@ struct TPCC : TestWorkload {
 						serializer(w, customer);
 						tr.set(customer.key(), w.toValue());
 					}
-					wait(tr.commit());
 				}
 			}
+			wait(tr.commit());
 		} catch (Error& e) {
 			return false;
 		}
@@ -623,74 +632,99 @@ struct TPCC : TestWorkload {
 		TraceEvent("StartingEmulatedUser").detail("Warehouse", w_id).detail("District", d_id);
 		loop {
 			auto type = deterministicRandom()->randomInt(0, 100);
-			Future<bool> tx;
+			state Future<bool> tx;
 			state double txnStartTime = g_network->now();
 
 			if (type < 4) {
-				tx = stockLevel(self, cx, w_id, d_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulStockLevelTransactions,
-					                           self->metrics.failedStockLevelTransactions,
-					                           txnStartTime,
-					                           self->metrics.stockLevelLatencies,
-					                           self->metrics.stockLevelResponseTime,
-					                           "StockLevel");
+				loop {
+					tx = stockLevel(self, cx, w_id, d_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulStockLevelTransactions,
+						                           self->metrics.failedStockLevelTransactions,
+						                           txnStartTime,
+						                           self->metrics.stockLevelLatencies,
+						                           self->metrics.stockLevelResponseTime,
+						                           "StockLevel");
+					}
+					//				wait(delay(2 + deterministicRandom()->random01() * 10));
+					if (committed) {
+						break;
+					}
 				}
-				wait(delay(2 + deterministicRandom()->random01() * 10));
 			} else if (type < 8) {
-				tx = delivery(self, cx, w_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulDeliveryTransactions,
-					                           self->metrics.failedDeliveryTransactions,
-					                           txnStartTime,
-					                           self->metrics.deliveryLatencies,
-					                           self->metrics.deliveryResponseTime,
-					                           "Delivery");
+				loop {
+					tx = delivery(self, cx, w_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulDeliveryTransactions,
+						                           self->metrics.failedDeliveryTransactions,
+						                           txnStartTime,
+						                           self->metrics.deliveryLatencies,
+						                           self->metrics.deliveryResponseTime,
+						                           "Delivery");
+					}
+					//				wait(delay(2 + deterministicRandom()->random01() * 10));
+					if (committed) {
+						break;
+					}
 				}
-				wait(delay(2 + deterministicRandom()->random01() * 10));
 			} else if (type < 12) {
-				tx = orderStatus(self, cx, w_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulOrderStatusTransactions,
-					                           self->metrics.failedOrderStatusTransactions,
-					                           txnStartTime,
-					                           self->metrics.orderStatusLatencies,
-					                           self->metrics.orderStatusResponseTime,
-					                           "OrderStatus");
+				loop {
+					tx = orderStatus(self, cx, w_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulOrderStatusTransactions,
+						                           self->metrics.failedOrderStatusTransactions,
+						                           txnStartTime,
+						                           self->metrics.orderStatusLatencies,
+						                           self->metrics.orderStatusResponseTime,
+						                           "OrderStatus");
+					}
+					//				wait(delay(2 + deterministicRandom()->random01() * 20));
+					if (committed) {
+						break;
+					}
 				}
-				wait(delay(2 + deterministicRandom()->random01() * 20));
 			} else if (type < 55) {
-				tx = payment(self, cx, w_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulPaymentTransactions,
-					                           self->metrics.failedPaymentTransactions,
-					                           txnStartTime,
-					                           self->metrics.paymentLatencies,
-					                           self->metrics.paymentResponseTime,
-					                           "Payment");
+				loop {
+					tx = payment(self, cx, w_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulPaymentTransactions,
+						                           self->metrics.failedPaymentTransactions,
+						                           txnStartTime,
+						                           self->metrics.paymentLatencies,
+						                           self->metrics.paymentResponseTime,
+						                           "Payment");
+					}
+					//				wait(delay(3 + deterministicRandom()->random01() * 24));
+					if (committed) {
+						break;
+					}
 				}
-				wait(delay(3 + deterministicRandom()->random01() * 24));
 			} else {
-				tx = newOrder(self, cx, w_id);
-				bool committed = wait(tx);
-				if (self->recordMetrics()) {
-					TPCCMetrics::updateMetrics(committed,
-					                           self->metrics.successfulNewOrderTransactions,
-					                           self->metrics.failedNewOrderTransactions,
-					                           txnStartTime,
-					                           self->metrics.newOrderLatencies,
-					                           self->metrics.newOrderResponseTime,
-					                           "NewOrder");
+				loop {
+					tx = newOrder(self, cx, w_id);
+					bool committed = wait(tx);
+					if (self->recordMetrics()) {
+						TPCCMetrics::updateMetrics(committed,
+						                           self->metrics.successfulNewOrderTransactions,
+						                           self->metrics.failedNewOrderTransactions,
+						                           txnStartTime,
+						                           self->metrics.newOrderLatencies,
+						                           self->metrics.newOrderResponseTime,
+						                           "NewOrder");
+					}
+					//				wait(delay(18 + deterministicRandom()->random01() * 24));
+					if (committed) {
+						break;
+					}
 				}
-				wait(delay(18 + deterministicRandom()->random01() * 24));
 			}
 		}
 	}
@@ -705,7 +739,7 @@ struct TPCC : TestWorkload {
 	}
 
 	virtual Future<Void> start(Database const& cx) override {
-		if (clientId >= clientsUsed)
+		if (clientId >= clientProcessesUsed)
 			return Void();
 		return _start(cx, this);
 	}
@@ -713,14 +747,38 @@ struct TPCC : TestWorkload {
 	ACTOR Future<Void> _start(Database cx, TPCC* self) {
 		wait(readGlobalState(self, cx));
 		self->startTime = g_network->now();
-		int startWID = self->clientId * self->warehousesPerClient;
-		int endWID = startWID + self->warehousesPerClient;
+		int startWID, endWID;
+		int remain = self->warehousesNum - self->warehousesPerClientProcess * self->clientProcessesUsed;
+		if (self->clientId < remain) {
+			startWID = self->clientId * (self->warehousesPerClientProcess + 1);
+			endWID = startWID + self->warehousesPerClientProcess + 1;
+		} else {
+			startWID = remain * (self->warehousesPerClientProcess + 1) +
+			           (self->clientId - remain) * self->warehousesPerClientProcess;
+			endWID = startWID + self->warehousesPerClientProcess;
+		}
+		TraceEvent("Start a Client Process")
+		    .detail("warehousesNum", self->warehousesNum)
+		    .detail("clientsProcessesUsed", self->clientProcessesUsed)
+		    .detail("warehousesPerClientProcess", self->warehousesPerClientProcess)
+		    .detail("remain", remain)
+		    .detail("clientId", self->clientId)
+		    .detail("startWID", startWID)
+		    .detail("endWID", endWID);
+		ASSERT(remain >= 0);
+		ASSERT(endWID <= self->warehousesNum);
 		state int w_id;
-		state int d_id;
+		state int d_id = 0;
+		state int cnt;
 		state vector<Future<Void>> emulatedUsers;
 		for (w_id = startWID; w_id < endWID; ++w_id) {
-			for (d_id = 0; d_id < 10; ++d_id) {
-				emulatedUsers.push_back(timeout(emulatedUser(self, cx, w_id, d_id), self->testDuration, Void()));
+			for (cnt = 0; cnt < self->clientsPerWarehouse; ++cnt) {
+				emulatedUsers.push_back(
+				    timeout(emulatedUser(self, cx, w_id, (d_id++) % 10), self->testDuration, Void()));
+			}
+			if (deterministicRandom()->randomInt(0, 100) < self->appendClientsProbability) {
+				emulatedUsers.push_back(
+				    timeout(emulatedUser(self, cx, w_id, (d_id++) % 10), self->testDuration, Void()));
 			}
 		}
 		wait(waitForAll(emulatedUsers));
@@ -731,7 +789,7 @@ struct TPCC : TestWorkload {
 		return (transactionsPerMinute() > expectedTransactionsPerMinute);
 	}
 	virtual void getMetrics(vector<PerfMetric>& m) override {
-		double multiplier = static_cast<double>(clientCount) / static_cast<double>(clientsUsed);
+		double multiplier = static_cast<double>(clientCount) / static_cast<double>(clientProcessesUsed);
 
 		m.push_back(PerfMetric("Transactions Per Minute", transactionsPerMinute(), false));
 
@@ -749,29 +807,29 @@ struct TPCC : TestWorkload {
 		m.push_back(PerfMetric("Failed NewOrder Transactions", metrics.failedNewOrderTransactions, false));
 
 		m.push_back(PerfMetric("Mean StockLevel Latency",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.stockLevelResponseTime /
-		                                                   metrics.successfulStockLevelTransactions)
-		                                                : 0.0,
+		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.stockLevelResponseTime /
+		                                                           metrics.successfulStockLevelTransactions)
+		                                                        : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean Delivery Latency",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.deliveryResponseTime /
-		                                                   metrics.successfulDeliveryTransactions)
-		                                                : 0.0,
+		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.deliveryResponseTime /
+		                                                           metrics.successfulDeliveryTransactions)
+		                                                        : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean OrderStatus Repsonse Time",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.orderStatusResponseTime /
-		                                                   metrics.successfulOrderStatusTransactions)
-		                                                : 0.0,
+		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.orderStatusResponseTime /
+		                                                           metrics.successfulOrderStatusTransactions)
+		                                                        : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean Payment Latency",
-		                       (clientId < clientsUsed)
+		                       (clientId < clientProcessesUsed)
 		                           ? (multiplier * metrics.paymentResponseTime / metrics.successfulPaymentTransactions)
 		                           : 0.0,
 		                       true));
 		m.push_back(PerfMetric("Mean NewOrder Latency",
-		                       (clientId < clientsUsed) ? (multiplier * metrics.newOrderResponseTime /
-		                                                   metrics.successfulNewOrderTransactions)
-		                                                : 0.0,
+		                       (clientId < clientProcessesUsed) ? (multiplier * metrics.newOrderResponseTime /
+		                                                           metrics.successfulNewOrderTransactions)
+		                                                        : 0.0,
 		                       true));
 
 		metrics.sort();
