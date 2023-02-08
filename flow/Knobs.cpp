@@ -63,7 +63,7 @@ void FlowKnobs::initialize(bool randomize, bool isSimulated) {
 
 	//connectionMonitor
 	init( CONNECTION_MONITOR_LOOP_TIME,   isSimulated ? 0.75 : 1.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_LOOP_TIME = 6.0;
-	init( CONNECTION_MONITOR_TIMEOUT,     isSimulated ? 6.0 : 6.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_TIMEOUT = 6.0;
+	init( CONNECTION_MONITOR_TIMEOUT,     isSimulated ? 20.0 : 20.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_TIMEOUT = 20.0;
 	init( CONNECTION_MONITOR_IDLE_TIMEOUT,                   180.0 ); if( randomize && BUGGIFY ) CONNECTION_MONITOR_IDLE_TIMEOUT = 5.0;
 	init( CONNECTION_MONITOR_INCOMING_IDLE_MULTIPLIER,         1.2 );
 	init( CONNECTION_MONITOR_UNREFERENCED_CLOSE_DELAY,         2.0 );
