@@ -682,7 +682,11 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 	    .detail("TesterCount", testers.size())
 	    .detail("Phases", spec.phases)
 	    .detail("TestTimeout", spec.timeout);
-
+	TraceEvent("TestRunning")
+	    .detail("WorkloadTitle", spec.title)
+	    .detail("TesterCount", testers.size())
+	    .detail("Phases", spec.phases)
+	    .detail("TestTimeout", spec.timeout);
 	state vector<Future<WorkloadInterface>> workRequests;
 	state vector<vector<PerfMetric>> metricsResults;
 
@@ -702,8 +706,9 @@ ACTOR Future<DistributedTestResults> runWorkload(Database cx, std::vector<Tester
 		req.sharedRandomNumber = sharedRandom;
 		workRequests.push_back(testers[i].recruitments.getReply(req));
 	}
-
+	TraceEvent("Before Getall");
 	state vector<WorkloadInterface> workloads = wait(getAll(workRequests));
+	TraceEvent("After Getall");
 	state double waitForFailureTime = g_network->isSimulated() ? 24 * 60 * 60 : 60;
 	if (g_network->isSimulated() && spec.simCheckRelocationDuration)
 		debug_setCheckRelocationDuration(true);
