@@ -77,6 +77,8 @@ DESCR struct ReadMetric {
 };
 
 struct ReadWriteWorkload : KVWorkload {
+	int distributedRatio;
+	bool isDistributed;
 	int readsPerTransactionA, writesPerTransactionA;
 	int readsPerTransactionB, writesPerTransactionB;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
@@ -142,6 +144,8 @@ struct ReadWriteWorkload : KVWorkload {
 		zipf = getOption(options, LiteralStringRef("zipf"), false);
 		zipfConstant = getOption(options, LiteralStringRef("zipfConstant"), 0.99);
 
+		isDistributed = getOption(options, LiteralStringRef("isDistributed"), false);
+		distributedRatio = getOption(options, LiteralStringRef("distributedRatio"), 0);
 		readsPerTransactionA = getOption(options, LiteralStringRef("readsPerTransactionA"), 10);
 		writesPerTransactionA = getOption(options, LiteralStringRef("writesPerTransactionA"), 0);
 		readsPerTransactionB = getOption(options, LiteralStringRef("readsPerTransactionB"), 1);
@@ -159,7 +163,11 @@ struct ReadWriteWorkload : KVWorkload {
 		}
 
 		if (zipf) {
-			myzipf = new ZipfianGenerator(0, nodeCount, zipfConstant);
+			if (isDistributed) {
+				myzipf = new ZipfianGenerator(0, nodeCount / self->clientCount, zipfConstant);
+			} else {
+				myzipf = new ZipfianGenerator(0, nodeCount, zipfConstant);
+			}
 		}
 
 		metricsStart = getOption(options, LiteralStringRef("metricsStart"), 0.0);
@@ -691,11 +699,26 @@ struct ReadWriteWorkload : KVWorkload {
 				state int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
 				state int extra_write_conflict_ranges = writes ? self->extraWriteConflictRangesPerTransaction : 0;
 				state std::set<int64_t> exist_keys;
+				auto remote_client = deterministicRandom()->randomInt(0, clientCount - 1);
+				if (remote_client == self->clientId) {
+					++remote_client;
+				}
+				auto remote_key = self->getRandomKey(self->nodeCount) + (nodeCount * remote_client) / self->clientCount;
+				bool isWrite = false;
+				auto startNode = (nodeCount * self->clientId) / self->clientCount;
+				if (isDistributed) {
+					if (!aTransaction && deterministicRandom()->randomInt(0, 10) < writesPerTransactionB) {
+						isWrite = true;
+					}
+				}
 				if (!self->adjacentReads) {
 					for (int op = 0; op < reads; op++) {
-						state int64_t rk = self->getRandomKey(self->nodeCount);
+						state int64_t rk = self->getRandomKey(self->nodeCount) + startNode;
+						if (isDistributed && op == 0 && !isWrite) {
+							rk = remote_key;
+						}
 						while (exist_keys.find(rk) != exist_keys.end()) {
-							rk = self->getRandomKey(self->nodeCount);
+							rk = self->getRandomKey(self->nodeCount) + startNode;
 						}
 						exist_keys.insert(rk);
 						keys.push_back(rk);
@@ -761,9 +784,12 @@ struct ReadWriteWorkload : KVWorkload {
 								tr.set(self->keyForIndex(startKey + op, false), values[op]);
 						} else {
 							for (int op = 0; op < writes; op++) {
-								state int64_t wk = self->getRandomKey(self->nodeCount);
+								state int64_t wk = self->getRandomKey(self->nodeCount) + startNode;
+								if (isDistributed && op == 0 && isWrite) {
+									wk = remote_key;
+								}
 								while (exist_keys.find(wk) != exist_keys.end()) {
-									wk = self->getRandomKey(self->nodeCount);
+									wk = self->getRandomKey(self->nodeCount) + startNode;
 								}
 								exist_keys.insert(wk);
 								tr.set(self->keyForIndex(wk, false), values[op]);
