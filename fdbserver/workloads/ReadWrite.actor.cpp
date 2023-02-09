@@ -703,9 +703,9 @@ struct ReadWriteWorkload : KVWorkload {
 				if (remote_client == self->clientId) {
 					++remote_client;
 				}
-				state auto remote_key = self->getRandomKey(self->nodeCount) + (self->nodeCount * remote_client) / self->clientCount;
+				state int64_t remote_key = self->getRandomKey(self->nodeCount) + (self->nodeCount * remote_client) / self->clientCount;
 				state bool isWrite = false;
-				state auto startNode = (nodeCount * self->clientId) / self->clientCount;
+				state auto startNode = (self->nodeCount * self->clientId) / self->clientCount;
 				if (self->isDistributed) {
 					if (!aTransaction && deterministicRandom()->randomInt(0, 10) < self->writesPerTransactionB) {
 						isWrite = true;
@@ -715,7 +715,7 @@ struct ReadWriteWorkload : KVWorkload {
 					for (int op = 0; op < reads; op++) {
 						state int64_t rk = self->getRandomKey(self->nodeCount) + self->startNode;
 						if (self->isDistributed && op == 0 && !isWrite) {
-							rk = remote_key;
+							rk = self->remote_key;
 						}
 						while (exist_keys.find(rk) != exist_keys.end()) {
 							rk = self->getRandomKey(self->nodeCount) + self->startNode;
@@ -786,7 +786,7 @@ struct ReadWriteWorkload : KVWorkload {
 							for (int op = 0; op < writes; op++) {
 								state int64_t wk = self->getRandomKey(self->nodeCount) + self->startNode;
 								if (self->isDistributed && op == 0 && isWrite) {
-									wk = remote_key;
+									wk = self->remote_key;
 								}
 								while (exist_keys.find(wk) != exist_keys.end()) {
 									wk = self->getRandomKey(self->nodeCount) + self->startNode;
