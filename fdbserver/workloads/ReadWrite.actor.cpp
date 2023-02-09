@@ -706,7 +706,7 @@ struct ReadWriteWorkload : KVWorkload {
 				state int64_t remote_key = self->getRandomKey(self->nodeCount) + (self->nodeCount * remote_client) / self->clientCount;
 				state bool isWrite = false;
 				state int64_t startNode = (self->nodeCount * self->clientId) / self->clientCount;
-				state distributed = false;
+				state bool distributed = false;
 				if (self->isDistributed) {
 					distributed = deterministicRandom()->randomInt(0, 100) < self->distributedRatio;
 					if (!aTransaction && deterministicRandom()->randomInt(0, 10) < self->writesPerTransactionB) {
