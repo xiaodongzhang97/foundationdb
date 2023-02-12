@@ -667,7 +667,7 @@ struct ReadWriteWorkload : KVWorkload {
 			TraceEvent("ClientStarting")
 			    .detail("ActorIndex", clientIndex)
 			    .detail("ClientIndex", self->clientId)
-			    .detail("NumActors", clientIndex * self->clientCount + self->clientId + 1)
+			    .detail("NumActors", clientIndex * self->clientCount + self->clientId + 1);
 		}
 		TraceEvent("actorCount")
 			.detail("actorCount", self->actorCount);
