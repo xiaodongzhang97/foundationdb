@@ -668,9 +668,9 @@ struct ReadWriteWorkload : KVWorkload {
 			    .detail("ActorIndex", clientIndex)
 			    .detail("ClientIndex", self->clientId)
 			    .detail("NumActors", clientIndex * self->clientCount + self->clientId + 1)
-				.detail("actorCount", self->actorCount);
 		}
-
+		TraceEvent("actorCount")
+			.detail("actorCount", self->actorCount);
 		loop {
 			wait(poisson(&lastTime, delay));
 
