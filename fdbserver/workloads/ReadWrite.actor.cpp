@@ -140,7 +140,6 @@ struct ReadWriteWorkload : KVWorkload {
 		double allowedLatency = getOption(options, LiteralStringRef("allowedLatency"), 0.250);
 		actorCount = ceil(transactionsPerSecond * allowedLatency);
 		actorCount = getOption(options, LiteralStringRef("actorCountPerTester"), actorCount);
-		printf("actorCount: %d\n", actorCount);
 		zipf = getOption(options, LiteralStringRef("zipf"), false);
 		zipfConstant = getOption(options, LiteralStringRef("zipfConstant"), 0.99);
 
@@ -668,7 +667,8 @@ struct ReadWriteWorkload : KVWorkload {
 			TraceEvent("ClientStarting")
 			    .detail("ActorIndex", clientIndex)
 			    .detail("ClientIndex", self->clientId)
-			    .detail("NumActors", clientIndex * self->clientCount + self->clientId + 1);
+			    .detail("NumActors", clientIndex * self->clientCount + self->clientId + 1)
+				.detail("actorCount", self->actorCount);
 		}
 
 		loop {
