@@ -712,14 +712,14 @@ struct ReadWriteWorkload : KVWorkload {
 				state bool distributed = false;
 				if (!self->isDistributedPerNode) {
 					remote_client = deterministicRandom()->randomInt(0, self->clientCount - 1);
-					if (remote_client == self->clientId) {
+					if (remote_client >= self->clientId) {
 						++remote_client;
 					}
 					remote_key = self->getRandomKey(self->nodeCount) + (self->nodeCount * remote_client) / self->clientCount;
 					startNode = (self->nodeCount * self->clientId) / self->clientCount;
 				} else {
-					remote_client = deterministicRandom()->randomInt(0, self->clientCount - 1) / 7;
-					if (remote_client == self->clientId / 7) {
+					remote_client = deterministicRandom()->randomInt(0, self->clientCount / 7 - 1);
+					if (remote_client >= self->clientId / 7) {
 						++remote_client;
 					}
 					remote_key = self->getRandomKey(self->nodeCount) + (self->nodeCount * remote_client * 7) / self->clientCount;
