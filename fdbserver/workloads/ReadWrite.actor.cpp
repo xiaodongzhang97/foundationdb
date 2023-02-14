@@ -705,12 +705,12 @@ struct ReadWriteWorkload : KVWorkload {
 				state int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
 				state int extra_write_conflict_ranges = writes ? self->extraWriteConflictRangesPerTransaction : 0;
 				state std::set<int64_t> exist_keys;
-				auto remote_client;
+				state int64_t remote_client;
 				state int64_t remote_key;
 				state bool isWrite = false;
 				state int64_t startNode;
 				state bool distributed = false;
-				if (!isDistributedPerNode) {
+				if (!self->isDistributedPerNode) {
 					remote_client = deterministicRandom()->randomInt(0, self->clientCount - 1);
 					if (remote_client == self->clientId) {
 						++remote_client;
