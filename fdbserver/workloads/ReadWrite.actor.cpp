@@ -79,6 +79,7 @@ DESCR struct ReadMetric {
 struct ReadWriteWorkload : KVWorkload {
 	int distributedRatio;
 	bool isDistributed;
+	bool isDistributedPerNode;
 	int readsPerTransactionA, writesPerTransactionA;
 	int readsPerTransactionB, writesPerTransactionB;
 	int extraReadConflictRangesPerTransaction, extraWriteConflictRangesPerTransaction;
@@ -144,6 +145,7 @@ struct ReadWriteWorkload : KVWorkload {
 		zipfConstant = getOption(options, LiteralStringRef("zipfConstant"), 0.99);
 
 		isDistributed = getOption(options, LiteralStringRef("isDistributed"), false);
+		isDistributedPerNode = getOption(options, LiteralStringRef("isDistributedPerNode"), false);
 		distributedRatio = getOption(options, LiteralStringRef("distributedRatio"), 0);
 		readsPerTransactionA = getOption(options, LiteralStringRef("readsPerTransactionA"), 10);
 		writesPerTransactionA = getOption(options, LiteralStringRef("writesPerTransactionA"), 0);
@@ -163,7 +165,11 @@ struct ReadWriteWorkload : KVWorkload {
 
 		if (zipf) {
 			if (isDistributed) {
-				myzipf = new ZipfianGenerator(0, nodeCount / clientCount, zipfConstant);
+				if (isDistributedPerNode) {
+					myzipf = new ZipfianGenerator(0, nodeCount * 7 / clientCount, zipfConstant);	
+				} else {
+					myzipf = new ZipfianGenerator(0, nodeCount / clientCount, zipfConstant);
+				}
 			} else {
 				myzipf = new ZipfianGenerator(0, nodeCount, zipfConstant);
 			}
@@ -699,14 +705,26 @@ struct ReadWriteWorkload : KVWorkload {
 				state int extra_read_conflict_ranges = writes ? self->extraReadConflictRangesPerTransaction : 0;
 				state int extra_write_conflict_ranges = writes ? self->extraWriteConflictRangesPerTransaction : 0;
 				state std::set<int64_t> exist_keys;
-				auto remote_client = deterministicRandom()->randomInt(0, self->clientCount - 1);
-				if (remote_client == self->clientId) {
-					++remote_client;
-				}
-				state int64_t remote_key = self->getRandomKey(self->nodeCount) + (self->nodeCount * remote_client) / self->clientCount;
+				auto remote_client;
+				state int64_t remote_key;
 				state bool isWrite = false;
-				state int64_t startNode = (self->nodeCount * self->clientId) / self->clientCount;
+				state int64_t startNode;
 				state bool distributed = false;
+				if (!isDistributedPerNode) {
+					remote_client = deterministicRandom()->randomInt(0, self->clientCount - 1);
+					if (remote_client == self->clientId) {
+						++remote_client;
+					}
+					remote_key = self->getRandomKey(self->nodeCount) + (self->nodeCount * remote_client) / self->clientCount;
+					startNode = (self->nodeCount * self->clientId) / self->clientCount;
+				} else {
+					remote_client = deterministicRandom()->randomInt(0, self->clientCount - 1) / 7;
+					if (remote_client == self->clientId / 7) {
+						++remote_client;
+					}
+					remote_key = self->getRandomKey(self->nodeCount) + (self->nodeCount * remote_client * 7) / self->clientCount;
+					startNode = (self->clientId / 7 * 7) * self->nodeCount / self->clientCount;
+				}
 				if (self->isDistributed) {
 					distributed = deterministicRandom()->randomInt(0, 100) < self->distributedRatio;
 					if (!aTransaction && deterministicRandom()->randomInt(0, 10) < self->writesPerTransactionB) {
